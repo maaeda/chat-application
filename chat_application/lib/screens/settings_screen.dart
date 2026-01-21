@@ -10,7 +10,7 @@ class SettingsScreen extends StatelessWidget {
         title: const Text('設定'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
-      body: const Center(child: Text('設定画面', style: TextStyle(fontSize: 24))),
+      body: Placeholder(),
     );
   }
 }
