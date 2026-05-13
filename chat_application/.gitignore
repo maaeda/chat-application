@@ -53,3 +53,18 @@ google-services.json
 env*.g.dart
 firebase_options*.dart
 firebase_app_id_file.json
+
+# Android keystores and credentials
+*.keystore
+*.jks
+android/key.properties
+android/local.properties
+
+# iOS / macOS dependencies (if not handled by sub-folder gitignore)
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.podspec
+macos/Pods/
+
+# Environment variables
+.env
