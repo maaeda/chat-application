@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'chat_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ChatListScreen extends StatelessWidget {
   const ChatListScreen({super.key});
@@ -90,6 +91,26 @@ class ChatListScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('チャット一覧'),
+        actions: [
+          // tap 可能にするために InkWell を使います。
+          InkWell(
+            onTap: () {
+              // プロフィール画面などへの遷移を追加予定
+            },
+            child: FirebaseAuth.instance.currentUser?.photoURL != null &&
+                    FirebaseAuth.instance.currentUser!.photoURL!.isNotEmpty
+                ? CircleAvatar(
+                    backgroundImage: NetworkImage(
+                      FirebaseAuth.instance.currentUser!.photoURL!,
+                    ),
+                    radius: 20,
+                  )
+                : const CircleAvatar(
+                    radius: 20,
+                    child: Icon(Icons.person),
+                  ),
+          )
+        ],
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: ListView.builder(
@@ -131,6 +152,13 @@ class ChatListScreen extends StatelessWidget {
             },
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          // Add your onPressed code here!
+        },
+        label: const Text('New Chat'),
+        icon: const Icon(Icons.add),
       ),
     );
   }

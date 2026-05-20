@@ -14,6 +14,26 @@ class ChatScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(name),
+        actions: [
+        // tap 可能にするために InkWell を使います。
+        InkWell(
+          onTap: () {
+            // プロフィール画面などへの遷移を追加予定
+          },
+          child: FirebaseAuth.instance.currentUser?.photoURL != null &&
+              FirebaseAuth.instance.currentUser!.photoURL!.isNotEmpty
+              ? CircleAvatar(
+            backgroundImage: NetworkImage(
+              FirebaseAuth.instance.currentUser!.photoURL!,
+            ),
+            radius: 20,
+          )
+              : const CircleAvatar(
+            radius: 20,
+            child: Icon(Icons.person),
+          ),
+        )
+      ],
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: Column(
@@ -21,7 +41,7 @@ class ChatScreen extends StatelessWidget {
           Expanded(
             child: StreamBuilder<QuerySnapshot<Post>>(
               // stream プロパティに snapshots() を与えると、コレクションの中のドキュメントをリアルタイムで監視することができます。
-              stream: postsReference.snapshots(),
+              stream:postsReference.orderBy('createdAt').snapshots(),
               // ここで受け取っている snapshot に stream で流れてきたデータが入っています。
               builder: (context, snapshot) {
                 // docs には Collection に保存されたすべてのドキュメントが入ります。
