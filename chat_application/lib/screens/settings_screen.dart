@@ -159,6 +159,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
 
+                      const SizedBox(height: 8),
+                      Text(
+                        'ユーザーID:${_user!.uid}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey,
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+                      Text(
+                        '登録日:${_user!.metadata.creationTime}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey,
+                        ),
+                      ),
+
                       const SizedBox(height: 32),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.logout),
