@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -68,6 +69,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         // 5. Firebaseにサインイン
         await _auth.signInWithCredential(credential);
+      }
+      // ログイン後、ユーザープロフィールを Firestore に保存
+      final user = _auth.currentUser;
+      if (user != null && mounted) {
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+          {
+            'uid': user.uid,
+            'email': user.email,
+            'displayName': user.displayName,
+            'photoURL': user.photoURL,
+            'updatedAt': Timestamp.now(),
+          },
+          SetOptions(merge: true),
+        );
       }
     } catch (e) {
       if (mounted) {

@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'post.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'models/chat_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,11 +69,21 @@ class _MainPageState extends State<MainPage> {
   }
 }
 
-final postsReference = FirebaseFirestore.instance.collection('posts').withConverter<Post>( // <> ここに変換したい型名をいれます。今回は Post です。
-  fromFirestore: ((snapshot, _) { // 第二引数は使わないのでその場合は _ で不使用であることを分かりやすくしています。
-    return Post.fromFirestore(snapshot); // 先ほど定期着した fromFirestore がここで活躍します。
-  }),
-  toFirestore: ((value, _) {
-    return value.toMap(); // 先ほど適宜した toMap がここで活躍します。
-  }),
+// chats collection reference with ChatModel converter
+final chatsReference = FirebaseFirestore.instance.collection('chats').withConverter<ChatModel>(
+  fromFirestore: (snapshot, _) => ChatModel.fromFirestore(snapshot),
+  toFirestore: (value, _) => value.toMap(),
 );
+
+// helper to get posts collection reference for a given chat
+CollectionReference<Post> postsReferenceFor(String chatId) =>
+    FirebaseFirestore.instance
+        .collection('chats')
+        .doc(chatId)
+        .collection('posts')
+        .withConverter<Post>(
+          fromFirestore: (snapshot, _) => Post.fromFirestore(snapshot),
+          toFirestore: (value, _) => value.toMap(),
+        );
+
+
