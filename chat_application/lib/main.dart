@@ -3,6 +3,8 @@ import 'screens/chat_list_screen.dart';
 import 'screens/settings_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
+import 'post.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,3 +66,12 @@ class _MainPageState extends State<MainPage> {
     );
   }
 }
+
+final postsReference = FirebaseFirestore.instance.collection('posts').withConverter<Post>( // <> ここに変換したい型名をいれます。今回は Post です。
+  fromFirestore: ((snapshot, _) { // 第二引数は使わないのでその場合は _ で不使用であることを分かりやすくしています。
+    return Post.fromFirestore(snapshot); // 先ほど定期着した fromFirestore がここで活躍します。
+  }),
+  toFirestore: ((value, _) {
+    return value.toMap(); // 先ほど適宜した toMap がここで活躍します。
+  }),
+);
