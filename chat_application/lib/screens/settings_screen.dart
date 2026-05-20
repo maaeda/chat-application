@@ -85,11 +85,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _signOut() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
     try {
-      await _googleSignIn.signOut();
+      // Web環境以外でのみGoogle Sign Outを実行
+      if (!kIsWeb) {
+        await _googleSignIn.signOut();
+      }
+      // Firebase Sign Out
       await _auth.signOut();
     } catch (e) {
       if (mounted) {
@@ -135,14 +140,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           radius: 40,
                           child: Icon(Icons.person, size: 40),
                         ),
+
                       const SizedBox(height: 16),
                       Text(
-                        'ログイン中: ${_user!.displayName ?? '名無しさん'}',
+                        'ログイン中: ${_user!.displayName ?? 'ユーザー名を取得できませんでした'}',
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+
                       const SizedBox(height: 8),
                       Text(
                         '${_user!.email}',
@@ -151,6 +158,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           color: Colors.grey,
                         ),
                       ),
+
                       const SizedBox(height: 32),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.logout),
@@ -160,6 +168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         onPressed: _signOut,
                       ),
+
                     ],
                   ),
       ),
