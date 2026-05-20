@@ -2,7 +2,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:chat_application/main.dart';
 import 'package:chat_application/post.dart';
-import 'package:chat_application/models/chat_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
@@ -72,7 +71,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final newPost = Post(
       text: trimmed,
       createdAt: Timestamp.now(),
-      posterName: user.displayName ?? '名無し',
+      posterName: user.displayName ?? '名前を取得できません',
       posterImageUrl: user.photoURL ?? '',
       posterId: user.uid,
       reference: newDoc,
@@ -119,6 +118,182 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Future<void> _showAddMembersDialog() async {
+    final List<String> _selectedNewMembers = [];
+    final Map<String, String> _selectedNewMembersInfo = {}; // UID → 名前のマッピング
+    final TextEditingController _searchController = TextEditingController();
+    List<Map<String, String>> _searchResults = [];
+
+    Future<void> _searchUsers(String query) async {
+      if (query.isEmpty) {
+        _searchResults.clear();
+      } else {
+        try {
+          final snapshot = await FirebaseFirestore.instance
+              .collection('users')
+              .where('email', isGreaterThanOrEqualTo: query)
+              .where('email', isLessThan: query + '\uffff')
+              .limit(10)
+              .get();
+
+          _searchResults = snapshot.docs
+              .map((doc) => {
+                'uid': doc.id,
+                'email': (doc['email'] ?? '') as String,
+                'name': (doc['displayName'] ?? 'Unknown') as String,
+              })
+              .toList();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('検索に失敗しました: $e')),
+            );
+          }
+        }
+      }
+    }
+
+    if (mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('メンバーを追加'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ユーザー検索欄
+                  TextField(
+                    controller: _searchController,
+                    decoration: const InputDecoration(
+                      labelText: 'ユーザーを検索（メール）',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    onChanged: (query) {
+                      _searchUsers(query);
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  // 検索結果リスト
+                  if (_searchResults.isEmpty && _searchController.text.isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text('検索結果がありません'),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 150),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _searchResults.length,
+                        itemBuilder: (context, index) {
+                          final user = _searchResults[index];
+                          final uid = user['uid'] ?? '';
+                          final isSelected = _selectedNewMembers.contains(uid);
+                          return CheckboxListTile(
+                            title: Text(user['name'] ?? ''),
+                            subtitle: Text(user['email'] ?? ''),
+                            value: isSelected,
+                            onChanged: (checked) {
+                              setState(() {
+                                if (checked == true) {
+                                  if (!_selectedNewMembers.contains(uid)) {
+                                    _selectedNewMembers.add(uid);
+                                    // ユーザー情報も保存（タグ表示時に使用）
+                                    _selectedNewMembersInfo[uid] = user['name'] ?? 'Unknown';
+                                  }
+                                } else {
+                                  _selectedNewMembers.remove(uid);
+                                  _selectedNewMembersInfo.remove(uid);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  // 選択したメンバーリスト（タグ表示）
+                  if (_selectedNewMembers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Wrap(
+                        spacing: 8,
+                        children: _selectedNewMembers
+                            .map((uid) {
+                              // 保存されたユーザー情報から名前を取得（検索結果が空でも大丈夫）
+                              final name = _selectedNewMembersInfo[uid] ?? uid;
+                              return Chip(
+                                label: Text(name),
+                                deleteIcon: const Icon(Icons.close),
+                                onDeleted: () => setState(() {
+                                  _selectedNewMembers.remove(uid);
+                                  _selectedNewMembersInfo.remove(uid);
+                                }),
+                              );
+                            })
+                            .toList(),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  if (_selectedNewMembers.isEmpty) {
+                    Navigator.of(context).pop();
+                    return;
+                  }
+
+                  try {
+                    // 現在の participants を取得
+                    final chatDoc = await chatsReference.doc(widget.chatId).get();
+                    final chat = chatDoc.data();
+                    if (chat == null) {
+                      Navigator.of(context).pop();
+                      return;
+                    }
+
+                    // 新しい participants（重複を避ける）
+                    final updatedParticipants = {...chat.participants, ..._selectedNewMembers}.toList();
+
+                    // participants を更新
+                    await chatsReference.doc(widget.chatId).update({
+                      'participants': updatedParticipants,
+                    });
+
+                    Navigator.of(context).pop();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('メンバーを追加しました')),
+                      );
+                    }
+                  } catch (e) {
+                    Navigator.of(context).pop();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('メンバー追加に失敗しました: $e')),
+                      );
+                    }
+                  }
+                },
+                child: const Text('追加'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _showMembersDialog() async {
     try {
       final chatDoc = await chatsReference.doc(widget.chatId).get();
@@ -137,6 +312,7 @@ class _ChatScreenState extends State<ChatScreen> {
             'uid': uid,
             'name': userData['displayName'] ?? 'Unknown',
             'email': userData['email'] ?? '',
+            'photoURL': userData['photoURL'] ?? '', // 追加：プロフィール画像
           });
         } catch (e) {
           // ユーザー情報取得失敗時はスキップ
@@ -156,10 +332,16 @@ class _ChatScreenState extends State<ChatScreen> {
                 itemBuilder: (context, index) {
                   final member = members[index];
                   final isMe = member['uid'] == FirebaseAuth.instance.currentUser?.uid;
+
+                  // メンバーのアイコン（photoURL またはイニシャル）
+                  final avatar = member['photoURL']!.isNotEmpty
+                      ? CircleAvatar(backgroundImage: NetworkImage(member['photoURL']!))
+                      : CircleAvatar(child: Text(member['name']?.substring(0, 1) ?? '?'));
+
                   return ListTile(
                     title: Text('${member['name']}${isMe ? ' (あなた)' : ''}'),
                     subtitle: Text(member['email'] ?? ''),
-                    leading: CircleAvatar(child: Text(member['name']?.substring(0, 1) ?? '?')),
+                    leading: avatar,
                   );
                 },
               ),
@@ -188,6 +370,11 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Text(widget.name),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_add),
+            onPressed: _showAddMembersDialog,
+            tooltip: 'メンバーを追加',
+          ),
           IconButton(
             icon: const Icon(Icons.people),
             onPressed: _showMembersDialog,
