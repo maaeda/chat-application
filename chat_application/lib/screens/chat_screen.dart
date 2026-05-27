@@ -5,7 +5,8 @@ import 'package:chat_application/post.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
-import 'package:firebase_ai/firebase_ai.dart';
+import 'package:firebase_ai/firebase_ai.dart' as firebase_ai;
+import 'package:google_generative_ai/google_generative_ai.dart' as google_ai;
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -49,17 +50,14 @@ class _ChatScreenState extends State<ChatScreen> {
     String? errorMessage;
 
     try {
-      // firebase_ai を使用（APIキー不要、Firebase認証情報を使用）
-      final model = FirebaseAI.googleAI().generativeModel(
-        model: 'gemini-2.5-flash',
-      );
-
+      const apiKey = String.fromEnvironment('GEMINI_API_KEY');
+      
       final history = recentPosts.length > 10 ? recentPosts.sublist(recentPosts.length - 10) : recentPosts;
       final historyText = history.map((p) => '${p.posterName}: ${p.text}').join('\n');
       
       final prompt = '''
 あなたはチャットアプリのスマートリプライ（返信サジェスト）生成アシスタントです。
-直近の会話履歴から、ユーザーが次に返信しそうな短く自然なフレーズを3つ提案してください。
+直近の会話履歴から、ユーザーが次に返信しそうな自然なフレーズを3つ提案してください。
 必ず以下のJSON配列形式のみを返してください。余計なテキストやMarkdownは一切含めないでください。
 例: ["了解しました！", "もう少し詳しく教えてください", "後で確認します"]
 
@@ -67,8 +65,25 @@ class _ChatScreenState extends State<ChatScreen> {
 $historyText
 ''';
 
-      final response = await model.generateContent([Content.text(prompt)]);
-      var text = response.text;
+      String? text;
+
+      if (apiKey.isNotEmpty) {
+        // --- 1. Google AI Studio (APIキー) を使用 ---
+        final model = google_ai.GenerativeModel(
+          model: 'gemini-2.5-flash',
+          apiKey: apiKey,
+        );
+        final response = await model.generateContent([google_ai.Content.text(prompt)]);
+        text = response.text;
+      } else {
+        // --- 2. Firebase AI Logic を使用 (フォールバック) ---
+        final model = firebase_ai.FirebaseAI.googleAI().generativeModel(
+          model: 'gemini-2.5-flash',
+        );
+        final response = await model.generateContent([firebase_ai.Content.text(prompt)]);
+        text = response.text;
+      }
+
       debugPrint('Smart reply raw response: $text');
 
       if (text == null || text.trim().isEmpty) {
@@ -107,16 +122,7 @@ $historyText
         setState(() {
           _isFetchingSuggestions = false;
         });
-        // ★ 診断用: エラーがあれば画面に表示する
-        if (errorMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('[サジェスト] $errorMessage'),
-              duration: const Duration(seconds: 8),
-              backgroundColor: Colors.red.shade700,
-            ),
-          );
-        }
+        // エラーはデバッグログにのみ出力（ユーザーには非表示）
       }
     }
   }
