@@ -4,6 +4,8 @@ import 'package:chat_application/main.dart';
 import 'package:chat_application/post.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert';
+import 'package:firebase_ai/firebase_ai.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -17,10 +19,113 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  List<String> _suggestedReplies = [];
+  bool _isFetchingSuggestions = false;
+  String? _lastProcessedMessageId;
+  bool _initialLoadComplete = false; // 初回ロード完了フラグ
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    if (_controller.text.isNotEmpty && _suggestedReplies.isNotEmpty) {
+      setState(() {
+        _suggestedReplies.clear();
+      });
+    }
+  }
+
+  Future<void> _fetchSmartReplies(List<Post> recentPosts) async {
+    if (_isFetchingSuggestions) return;
+    setState(() {
+      _isFetchingSuggestions = true;
+      _suggestedReplies.clear();
+    });
+
+    String? errorMessage;
+
+    try {
+      // firebase_ai を使用（APIキー不要、Firebase認証情報を使用）
+      final model = FirebaseAI.googleAI().generativeModel(
+        model: 'gemini-2.5-flash',
+      );
+
+      final history = recentPosts.length > 10 ? recentPosts.sublist(recentPosts.length - 10) : recentPosts;
+      final historyText = history.map((p) => '${p.posterName}: ${p.text}').join('\n');
+      
+      final prompt = '''
+あなたはチャットアプリのスマートリプライ（返信サジェスト）生成アシスタントです。
+直近の会話履歴から、ユーザーが次に返信しそうな短く自然なフレーズを3つ提案してください。
+必ず以下のJSON配列形式のみを返してください。余計なテキストやMarkdownは一切含めないでください。
+例: ["了解しました！", "もう少し詳しく教えてください", "後で確認します"]
+
+会話履歴:
+$historyText
+''';
+
+      final response = await model.generateContent([Content.text(prompt)]);
+      var text = response.text;
+      debugPrint('Smart reply raw response: $text');
+
+      if (text == null || text.trim().isEmpty) {
+        errorMessage = 'レスポンスが空です';
+        return;
+      }
+
+      // Markdown形式 (```json ... ```) が含まれてしまった場合への堅牢な対策
+      text = text.replaceAll(RegExp(r'```json', caseSensitive: false), '');
+      text = text.replaceAll('```', '');
+      text = text.trim();
+
+      // JSONの先頭 '[' と末尾 ']' を抽出して安全にパース
+      final startIdx = text.indexOf('[');
+      final endIdx = text.lastIndexOf(']');
+      if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+        text = text.substring(startIdx, endIdx + 1);
+      } else {
+        errorMessage = 'JSONが見つかりません: $text';
+        return;
+      }
+
+      final List<dynamic> parsed = jsonDecode(text);
+      final List<String> suggestions = parsed.map((e) => e.toString()).toList();
+
+      if (mounted && _controller.text.isEmpty) {
+        setState(() {
+          _suggestedReplies = suggestions;
+        });
+      }
+    } catch (e) {
+      errorMessage = 'エラー: $e';
+      debugPrint('Smart reply error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingSuggestions = false;
+        });
+        // ★ 診断用: エラーがあれば画面に表示する
+        if (errorMessage != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('[サジェスト] $errorMessage'),
+              duration: const Duration(seconds: 8),
+              backgroundColor: Colors.red.shade700,
+            ),
+          );
+        }
+      }
+    }
+  }
 
   @override
   void dispose() {
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -335,7 +440,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
                   // メンバーのアイコン（photoURL またはイニシャル）
                   final avatar = member['photoURL']!.isNotEmpty
-                      ? CircleAvatar(backgroundImage: NetworkImage(member['photoURL']!))
+                      ? CircleAvatar(
+                          backgroundImage: NetworkImage(member['photoURL']!),
+                          onBackgroundImageError: (_, __) {},
+                        )
                       : CircleAvatar(child: Text(member['name']?.substring(0, 1) ?? '?'));
 
                   return ListTile(
@@ -389,8 +497,57 @@ class _ChatScreenState extends State<ChatScreen> {
               stream: postsReferenceFor(widget.chatId).orderBy('createdAt').snapshots(),
               builder: (context, snapshot) {
                 final docs = snapshot.data?.docs ?? [];
+
+                if (docs.isNotEmpty) {
+                  final lastDoc = docs.last;
+                  final lastId = lastDoc.id;
+                  final lastPost = lastDoc.data();
+                  final isFromOther = lastPost.posterId != currentUid;
+
+                  if (lastId != _lastProcessedMessageId) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      if (_lastProcessedMessageId == lastId) return; // 二重実行防止
+
+                      final isFirstLoad = !_initialLoadComplete;
+
+                      setState(() {
+                        _lastProcessedMessageId = lastId;
+                        _initialLoadComplete = true;
+                        if (!isFromOther) _suggestedReplies.clear();
+                      });
+
+                      if (_scrollController.hasClients) {
+                        if (isFirstLoad) {
+                          // 初回: アニメーションなしで即座に最下部へ
+                          _scrollController.jumpTo(
+                            _scrollController.position.maxScrollExtent,
+                          );
+                        } else {
+                          // 新着メッセージ: スムーズにスクロール
+                          _scrollController.animateTo(
+                            _scrollController.position.maxScrollExtent,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeOut,
+                          );
+                        }
+                      }
+
+                      // 初回ロードはAPIを叩かない。相手のメッセージが来た時だけ生成
+                      if (!isFirstLoad && isFromOther) {
+                        _fetchSmartReplies(docs.map((d) => d.data()).toList());
+                      }
+                    });
+                  }
+                }
+
                 return ListView.builder(
-                  padding: const EdgeInsets.all(12),
+                  controller: _scrollController,
+                  padding: EdgeInsets.fromLTRB(
+                    12, 12, 12,
+                    // サジェスト欄が表示中は下部に余白を追加
+                    (_isFetchingSuggestions || _suggestedReplies.isNotEmpty) ? 62 : 12,
+                  ),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final doc = docs[index];
@@ -398,7 +555,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     final isMe = currentUid != null && post.posterId == currentUid;
 
                     final avatar = post.posterImageUrl.isNotEmpty
-                        ? CircleAvatar(backgroundImage: NetworkImage(post.posterImageUrl))
+                        ? CircleAvatar(
+                            backgroundImage: NetworkImage(post.posterImageUrl),
+                            onBackgroundImageError: (_, __) {},
+                          )
                         : CircleAvatar(child: Text((post.posterName.isNotEmpty ? post.posterName[0] : '?')));
 
                     // 名前はバブルの外に表示し、バブルは本文と日時だけを囲む
@@ -463,29 +623,68 @@ class _ChatScreenState extends State<ChatScreen> {
 
           // 入力欄
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      decoration: const InputDecoration(
-                        hintText: 'メッセージを入力',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_isFetchingSuggestions || _suggestedReplies.isNotEmpty)
+                  Container(
+                    height: 50,
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    alignment: Alignment.centerLeft,
+                    child: _isFetchingSuggestions
+                        ? const Padding(
+                            padding: EdgeInsets.only(left: 8.0),
+                            child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                          )
+                        : ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _suggestedReplies.length,
+                            separatorBuilder: (context, index) => const SizedBox(width: 8),
+                            itemBuilder: (context, index) {
+                              final text = _suggestedReplies[index];
+                              return ActionChip(
+                                label: Text(text),
+                                onPressed: () {
+                                  _sendMessage(text);
+                                  setState(() {
+                                    _suggestedReplies.clear();
+                                  });
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          maxLines: null, // 複数行入力を許可
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          decoration: const InputDecoration(
+                            hintText: 'メッセージを入力',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                        ),
                       ),
-                      onSubmitted: (text) => _sendMessage(text),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () => _sendMessage(_controller.text),
-                    child: const Text('送信'),
-                  ),
-                ],
+                      const SizedBox(width: 8),
+                      // 送信ボタンは下揃えにして複数行でも使いやすくする
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: ElevatedButton(
+                          onPressed: () => _sendMessage(_controller.text),
+                          child: const Text('送信'),
+                        ),
+                      ),
+                    ],
               ),
             ),
+          ],
+        ),
           ),
         ],
       ),

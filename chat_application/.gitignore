@@ -68,3 +68,5 @@ macos/Pods/
 
 # Environment variables
 .env
+# API Key Config
+config.json
