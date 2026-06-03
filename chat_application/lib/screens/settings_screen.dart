@@ -23,8 +23,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // AIバックエンド設定
   AiBackend _selectedBackend = AiBackend.googleAi;
   String _selectedModelName = kLocalModels.first.name;
-  bool _isModelInstalled = false;
-  bool _isDownloading = false;
+
+  // モデルごとのインストール状態を保持するマップ
+  Map<String, bool> _installedModels = {};
+  // ダウンロード中のモデル名
+  String? _downloadingModelName;
   double _downloadProgress = 0.0;
 
   // HuggingFace トークン設定用
@@ -51,27 +54,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
+  String _getModelFileId(LocalModelInfo model) => model.url.split('/').last;
+
   Future<void> _loadAiSettings() async {
     final backend = await AiBackendService.getBackend();
     final modelName = await AiBackendService.getSelectedModelName();
     final hfToken = await AiBackendService.getHuggingFaceToken();
-    final installed = FlutterGemma.hasActiveModel();
+
+    // 全モデルのインストール状態を一括チェック
+    final Map<String, bool> installed = {};
+    for (final m in kLocalModels) {
+      installed[m.name] = await FlutterGemma.isModelInstalled(_getModelFileId(m));
+    }
+
     if (mounted) {
       setState(() {
         _selectedBackend = backend;
         _selectedModelName = modelName;
-        _isModelInstalled = installed;
+        _installedModels = installed;
         _hfTokenController.text = hfToken;
       });
     }
   }
 
-  Future<void> _downloadModel() async {
-    final model = AiBackendService.getModelByName(_selectedModelName);
+  Future<void> _downloadModel(LocalModelInfo model) async {
+    // HFトークンが必要なモデルで未入力の場合は警告ダイアログを表示
+    if (model.needsAuth && _hfTokenController.text.trim().isEmpty) {
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(Icons.lock, size: 36, color: Colors.orange),
+          title: const Text('HuggingFace トークンが必要です'),
+          content: Text(
+            '「${model.displayName}」はライセンス同意が必要なモデルです。\n\n'
+            '① huggingface.co でモデルページを開き、利用規約に同意してください。\n'
+            '② HuggingFace の設定からRead権限のアクセストークンを発行してください。\n'
+            '③ 上部の「HuggingFace トークン」欄に入力してから再度ダウンロードしてください。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('閉じる'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     setState(() {
-      _isDownloading = true;
+      _downloadingModelName = model.name;
       _downloadProgress = 0.0;
     });
+
     try {
       final token = _hfTokenController.text.trim();
       await AiBackendService.setHuggingFaceToken(token);
@@ -81,33 +117,87 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
       await FlutterGemma.installModel(
-        modelType: ModelType.gemmaIt,
+        modelType: model.modelType,
       ).fromNetwork(model.url)
           .withProgress((p) {
             if (mounted) setState(() => _downloadProgress = p / 100.0);
           })
           .install();
-      final installed = FlutterGemma.hasActiveModel();
+
+      // インストール状態を更新
+      final isInstalled = await FlutterGemma.isModelInstalled(_getModelFileId(model));
       if (mounted) {
         setState(() {
-          _isModelInstalled = installed;
+          _installedModels[model.name] = isInstalled;
           _downloadProgress = 1.0;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('モデルのダウンロードが完了しました！')),
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('${model.displayName} のダウンロードが完了しました！'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ダウンロードに失敗しました: $e')),
+          SnackBar(
+            content: Text('ダウンロードに失敗しました: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
       if (mounted) {
         setState(() {
-          _isDownloading = false;
+          _downloadingModelName = null;
         });
+      }
+    }
+  }
+
+  Future<void> _deleteModel(LocalModelInfo model) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('モデルを削除しますか？'),
+        content: Text('「${model.displayName}」を削除します。\n再度使用するにはダウンロードが必要になります。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('削除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await FlutterGemma.uninstallModel(_getModelFileId(model));
+      setState(() {
+        _installedModels[model.name] = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${model.displayName} を削除しました。')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('削除に失敗しました: $e')),
+        );
       }
     }
   }
@@ -121,37 +211,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _signInWithGoogle() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
       if (kIsWeb) {
-        // Web用のGoogleログイン
         GoogleAuthProvider authProvider = GoogleAuthProvider();
         await _auth.signInWithPopup(authProvider);
       } else {
-        // モバイル(Android/iOS)用のGoogleログイン
-        // 1. Google認証
         final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
-
-        // 2. 認証情報の取得 (idToken)
         final GoogleSignInAuthentication googleAuth = googleUser.authentication;
-
-        // 3. アクセストークンの取得
         final authorization =
             await googleUser.authorizationClient.authorizeScopes(['email']);
-
-        // 4. Firebase用クレデンシャルの作成
         final OAuthCredential credential = GoogleAuthProvider.credential(
           accessToken: authorization.accessToken,
           idToken: googleAuth.idToken,
         );
-
-        // 5. Firebaseにサインイン
         await _auth.signInWithCredential(credential);
       }
-      // ログイン後、ユーザープロフィールを Firestore に保存
       final user = _auth.currentUser;
       if (user != null && mounted) {
         await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
@@ -172,25 +247,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _signOut() async {
     if (!mounted) return;
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
     try {
-      // Web環境以外でのみGoogle Sign Outを実行
-      if (!kIsWeb) {
-        await _googleSignIn.signOut();
-      }
-      // Firebase Sign Out
+      if (!kIsWeb) await _googleSignIn.signOut();
       await _auth.signOut();
     } catch (e) {
       if (mounted) {
@@ -199,175 +264,385 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // ===============================================================
+  // UI ビルダー
+  // ===============================================================
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Text(
+        title.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.primary,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBackendSelector() {
+    final backends = [
+      (
+        value: AiBackend.googleAi,
+        title: 'Google AI Studio',
+        subtitle: 'APIキー (GEMINI_API_KEY) を使用',
+        icon: Icons.api,
+        enabled: true,
+      ),
+      (
+        value: AiBackend.firebaseAi,
+        title: 'Firebase AI Logic',
+        subtitle: 'Firebase プロジェクトの認証情報を使用',
+        icon: Icons.local_fire_department,
+        enabled: true,
+      ),
+      (
+        value: AiBackend.localLlm,
+        title: 'ローカルLLM (オンデバイス)',
+        subtitle: kIsWeb ? 'Android / iOS のみ対応' : 'API不要・完全プライベート',
+        icon: Icons.smartphone,
+        enabled: !kIsWeb,
+      ),
+    ];
+
+    return Column(
+      children: backends.map((b) {
+        final isSelected = _selectedBackend == b.value;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: InkWell(
+            onTap: b.enabled
+                ? () async {
+                    await AiBackendService.setBackend(b.value);
+                    setState(() => _selectedBackend = b.value);
+                  }
+                : null,
+            borderRadius: BorderRadius.circular(12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).dividerColor,
+                  width: isSelected ? 2 : 1,
+                ),
+                color: isSelected
+                    ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)
+                    : Theme.of(context).cardColor,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(
+                      b.icon,
+                      size: 22,
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : b.enabled
+                              ? Theme.of(context).iconTheme.color
+                              : Colors.grey,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            b.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              color: b.enabled ? null : Colors.grey,
+                            ),
+                          ),
+                          Text(
+                            b.subtitle,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: b.enabled ? Colors.grey : Colors.grey.shade400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isSelected)
+                      Icon(Icons.check_circle,
+                          color: Theme.of(context).colorScheme.primary, size: 20),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildHfTokenSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Card(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.vpn_key_rounded,
+                      color: Theme.of(context).colorScheme.secondary, size: 18),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'HuggingFace アクセストークン',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.orange.shade300),
+                    ),
+                    child: const Text(
+                      '一部モデルで必要',
+                      style: TextStyle(fontSize: 10, color: Colors.orange),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _hfTokenController,
+                obscureText: _obscureToken,
+                onChanged: (val) async {
+                  await AiBackendService.setHuggingFaceToken(val.trim());
+                },
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'hf_xxxxxxxxxxxxxxxxxxxx',
+                  prefixIcon: const Icon(Icons.key, size: 18),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureToken ? Icons.visibility : Icons.visibility_off,
+                      size: 18,
+                    ),
+                    onPressed: () => setState(() => _obscureToken = !_obscureToken),
+                  ),
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelCard(LocalModelInfo model) {
+    final isSelected = _selectedModelName == model.name;
+    final isInstalled = _installedModels[model.name] ?? false;
+    final isDownloading = _downloadingModelName == model.name;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      child: InkWell(
+        onTap: () async {
+          await AiBackendService.setSelectedModelName(model.name);
+          setState(() => _selectedModelName = model.name);
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSelected ? colorScheme.primary : Theme.of(context).dividerColor,
+              width: isSelected ? 2 : 1,
+            ),
+            color: isSelected
+                ? colorScheme.primary.withValues(alpha: 0.05)
+                : Theme.of(context).cardColor,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── ヘッダー行 ──
+                Row(
+                  children: [
+                    // サイズバッジ
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? colorScheme.primary
+                            : colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        model.sizeLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected ? Colors.white : colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        model.displayName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    // 認証必要バッジ
+                    if (model.needsAuth)
+                      Tooltip(
+                        message: 'HFトークンとライセンス同意が必要',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.orange.shade300),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.lock, size: 10, color: Colors.orange),
+                              SizedBox(width: 3),
+                              Text('要認証',
+                                  style: TextStyle(
+                                      fontSize: 10, color: Colors.orange)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    // インストール済みアイコン
+                    if (isInstalled && !isDownloading)
+                      const Icon(Icons.check_circle,
+                          color: Colors.green, size: 18),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  model.description,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600),
+                ),
+                // ── ダウンロード中 ──
+                if (isDownloading) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: _downloadProgress,
+                            minHeight: 6,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        '${(_downloadProgress * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ]
+                // ── インストール済み：削除ボタン ──
+                else if (isInstalled) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.delete_outline, size: 16),
+                        label: const Text('削除', style: TextStyle(fontSize: 13)),
+                        onPressed: () => _deleteModel(model),
+                      ),
+                    ],
+                  ),
+                ]
+                // ── 未インストール：ダウンロードボタン ──
+                else if (isSelected) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                          'ダウンロード (${model.sizeLabel})',
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: _downloadingModelName != null
+                          ? null
+                          : () => _downloadModel(model),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildAiBackendSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Divider(),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Text(
-            'AIバックエンド設定',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey),
-          ),
-        ),
-        RadioListTile<AiBackend>(
-          title: const Text('Google AI Studio'),
-          subtitle: const Text('APIキー (--dart-define=GEMINI_API_KEY) を使用'),
-          value: AiBackend.googleAi,
-          groupValue: _selectedBackend,
-          onChanged: (v) async {
-            if (v == null) return;
-            await AiBackendService.setBackend(v);
-            setState(() => _selectedBackend = v);
-          },
-        ),
-        RadioListTile<AiBackend>(
-          title: const Text('Firebase AI Logic'),
-          subtitle: const Text('Firebase プロジェクトの認証情報を使用'),
-          value: AiBackend.firebaseAi,
-          groupValue: _selectedBackend,
-          onChanged: (v) async {
-            if (v == null) return;
-            await AiBackendService.setBackend(v);
-            setState(() => _selectedBackend = v);
-          },
-        ),
-        RadioListTile<AiBackend>(
-          title: const Text('ローカルLLM (オンデバイス)'),
-          subtitle: const Text('API不要・プライバシー保護。遅い可能性あり。Android/iOSのみ'),
-          value: AiBackend.localLlm,
-          groupValue: _selectedBackend,
-          onChanged: kIsWeb
-              ? null
-              : (v) async {
-                  if (v == null) return;
-                  await AiBackendService.setBackend(v);
-                  setState(() => _selectedBackend = v);
-                },
-        ),
-        if (_selectedBackend == AiBackend.localLlm && !kIsWeb) ..._buildLocalLlmSection(),
+        const Divider(height: 1),
+        _buildSectionHeader('AI バックエンド'),
+        _buildBackendSelector(),
+        if (_selectedBackend == AiBackend.localLlm && !kIsWeb) ...[
+          _buildSectionHeader('HuggingFace 認証'),
+          _buildHfTokenSection(),
+          _buildSectionHeader('モデルを選択'),
+          ...kLocalModels.map(_buildModelCard),
+          const SizedBox(height: 8),
+        ],
       ],
     );
-  }
-
-  List<Widget> _buildLocalLlmSection() {
-    final model = AiBackendService.getModelByName(_selectedModelName);
-    return [
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.lock_outline, color: Theme.of(context).colorScheme.primary, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'HuggingFace 認証トークン',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'SmolLM などの一部のゲートモデル（利用規約への同意が必要なモデル）をダウンロードする際、HuggingFaceのアクセストークン（Read権限）が必要です。',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _hfTokenController,
-                  obscureText: _obscureToken,
-                  onChanged: (val) async {
-                    await AiBackendService.setHuggingFaceToken(val.trim());
-                  },
-                  decoration: InputDecoration(
-                    isDense: true,
-                    labelText: 'HuggingFace Access Token (hf_...)',
-                    hintText: 'hf_...',
-                    prefixIcon: const Icon(Icons.key),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureToken ? Icons.visibility : Icons.visibility_off,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _obscureToken = !_obscureToken;
-                        });
-                      },
-                    ),
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(8)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-        child: Text('モデルを選択', style: TextStyle(fontWeight: FontWeight.w600)),
-      ),
-      ...kLocalModels.map((m) => RadioListTile<String>(
-        title: Text(m.displayName),
-        subtitle: Text('${m.sizeLabel} - ${m.description}'),
-        value: m.name,
-        groupValue: _selectedModelName,
-        onChanged: (v) async {
-          if (v == null) return;
-          await AiBackendService.setSelectedModelName(v);
-          final installed = FlutterGemma.hasActiveModel();
-          setState(() {
-            _selectedModelName = v;
-            _isModelInstalled = installed;
-          });
-        },
-      )),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_isDownloading) ...([
-              Text('ダウンロード中... ${(_downloadProgress * 100).toStringAsFixed(1)}%'),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(value: _downloadProgress),
-            ]) else if (_isModelInstalled)
-              Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.green),
-                  const SizedBox(width: 8),
-                  Text('${model.displayName} インストール済み'),
-                ],
-              )
-            else
-              ElevatedButton.icon(
-                icon: const Icon(Icons.download),
-                label: Text('${model.displayName} をダウンロード (${model.sizeLabel})'),
-                onPressed: _downloadModel,
-              ),
-          ],
-        ),
-      ),
-    ];
   }
 
   @override
@@ -381,54 +656,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
-                const SizedBox(height: 16),
+                _buildSectionHeader('アカウント'),
                 if (_user == null)
                   Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: ElevatedButton.icon(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: FilledButton.icon(
                       icon: const Icon(Icons.login),
                       label: const Text('Googleでサインイン'),
                       onPressed: _signInWithGoogle,
                     ),
                   )
                 else
-                  Column(
-                    children: [
-                      if (_user!.photoURL != null)
-                        CircleAvatar(
-                          backgroundImage: NetworkImage(_user!.photoURL!),
-                          radius: 40,
-                        )
-                      else
-                        const CircleAvatar(
-                          radius: 40,
-                          child: Icon(Icons.person, size: 40),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Theme.of(context).dividerColor),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            if (_user!.photoURL != null)
+                              CircleAvatar(
+                                backgroundImage: NetworkImage(_user!.photoURL!),
+                                radius: 36,
+                              )
+                            else
+                              const CircleAvatar(
+                                radius: 36,
+                                child: Icon(Icons.person, size: 36),
+                              ),
+                            const SizedBox(height: 12),
+                            Text(
+                              _user!.displayName ?? 'ユーザー',
+                              style: const TextStyle(
+                                  fontSize: 17, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              _user!.email ?? '',
+                              style: const TextStyle(
+                                  fontSize: 13, color: Colors.grey),
+                            ),
+                            const SizedBox(height: 16),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.logout, size: 16),
+                              label: const Text('サインアウト'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                side: const BorderSide(color: Colors.red),
+                              ),
+                              onPressed: _signOut,
+                            ),
+                          ],
                         ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'ログイン中: ${_user!.displayName ?? 'ユーザー名を取得できませんでした'}',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(height: 8),
-                      Text('${_user!.email}',
-                          style: const TextStyle(fontSize: 16, color: Colors.grey)),
-                      const SizedBox(height: 8),
-                      Text('ユーザーID: ${_user!.uid}',
-                          style: const TextStyle(fontSize: 14, color: Colors.grey)),
-                      const SizedBox(height: 8),
-                      Text('登録日: ${_user!.metadata.creationTime}',
-                          style: const TextStyle(fontSize: 14, color: Colors.grey)),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.logout),
-                        label: const Text('サインアウト'),
-                        style: ElevatedButton.styleFrom(foregroundColor: Colors.red),
-                        onPressed: _signOut,
-                      ),
-                    ],
+                    ),
                   ),
                 _buildAiBackendSection(),
-                const SizedBox(height: 32),
+                const SizedBox(height: 40),
               ],
             ),
     );

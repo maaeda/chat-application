@@ -56,12 +56,29 @@ class _ChatScreenState extends State<ChatScreen> {
       final backend = await AiBackendService.getBackend();
 
       final history = recentPosts.length > 10
-          ? recentPosts.sublist(recentPosts.length - 10)
-          : recentPosts;
+          ? recentPosts.sublist(0, 10).reversed.toList()
+          : recentPosts.reversed.toList();
       final historyText =
           history.map((p) => '${p.posterName}: ${p.text}').join('\n');
 
-      final prompt = '''
+      // 設定画面からのバックエンド設定を優先、次にAPIKeyの有無で判定
+      final effectiveBackend = (backend == AiBackend.googleAi && apiKey.isEmpty)
+          ? AiBackend.firebaseAi
+          : backend;
+
+      String prompt = '';
+      if (effectiveBackend == AiBackend.localLlm) {
+        prompt = '''
+Task: Suggest 3 short and natural Japanese replies based on the chat history below.
+DO NOT use JSON. DO NOT use quotes. Just output exactly 3 lines of Japanese text, one option per line.
+
+Chat history:
+$historyText
+
+Suggested replies (in Japanese):
+1. ''';
+      } else {
+        prompt = '''
 あなたはチャットアプリの返信サジェスト生成アシスタントです。
 直近の会話履歴から、ユーザーが次に返信しそうな自然なフレーズを3つ提案してください。
 必ず以下のJSON配列形式のみを返してください。余計なテキストやMarkdownは一切含めないでください。
@@ -70,13 +87,9 @@ class _ChatScreenState extends State<ChatScreen> {
 会話履歴:
 $historyText
 ''';
+      }
 
       String? text;
-
-      // 設定画面からのバックエンド設定を優先、次にAPIKeyの有無で判定
-      final effectiveBackend = (backend == AiBackend.googleAi && apiKey.isEmpty)
-          ? AiBackend.firebaseAi
-          : backend;
 
       switch (effectiveBackend) {
         case AiBackend.googleAi:
@@ -126,15 +139,31 @@ $historyText
       // JSONの先頭 '[' と末尾 ']' を抽出して安全にパース
       final startIdx = text.indexOf('[');
       final endIdx = text.lastIndexOf(']');
+      
+      List<String> suggestions = [];
+      
       if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
-        text = text.substring(startIdx, endIdx + 1);
+        final jsonText = text.substring(startIdx, endIdx + 1);
+        final List<dynamic> parsed = jsonDecode(jsonText);
+        suggestions = parsed.map((e) => e.toString()).toList();
       } else {
-        errorMessage = 'JSONが見つかりません: $text';
-        return;
+        // フォールバック: 行ごとに分割してサジェストにする
+        final lines = text.split('\n')
+            .map((e) => e.replaceAll(RegExp(r'^[-*0-9.\s]+'), '')) // 行頭の箇条書き記号を削除
+            .map((e) => e.replaceAll(RegExp(r'[{}"\[\]:]+'), '')) // JSON由来の記号を削除 (英字は消さない)
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty && e.length < 50)
+            .take(3)
+            .toList();
+        if (lines.isNotEmpty) {
+          suggestions = lines;
+        } else {
+          String preview = text.replaceAll(RegExp(r'[\r\n\t\\]+'), ' ');
+          if (preview.length > 40) preview = preview.substring(0, 40) + '...';
+          errorMessage = 'サジェストを生成できませんでした ($preview)';
+          return;
+        }
       }
-
-      final List<dynamic> parsed = jsonDecode(text);
-      final List<String> suggestions = parsed.map((e) => e.toString()).toList();
 
       if (mounted && _controller.text.isEmpty) {
         setState(() {
@@ -149,7 +178,11 @@ $historyText
         setState(() {
           _isFetchingSuggestions = false;
         });
-        // エラーはデバッグログにのみ出力（ユーザーには非表示）
+        if (errorMessage != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errorMessage!)),
+          );
+        }
       }
     }
   }
@@ -527,12 +560,12 @@ $historyText
         children: [
           Expanded(
             child: StreamBuilder<QuerySnapshot<Post>>(
-              stream: postsReferenceFor(widget.chatId).orderBy('createdAt').snapshots(),
+              stream: postsReferenceFor(widget.chatId).orderBy('createdAt', descending: true).snapshots(),
               builder: (context, snapshot) {
                 final docs = snapshot.data?.docs ?? [];
 
                 if (docs.isNotEmpty) {
-                  final lastDoc = docs.last;
+                  final lastDoc = docs.first;
                   final lastId = lastDoc.id;
                   final lastPost = lastDoc.data();
                   final isFromOther = lastPost.posterId != currentUid;
@@ -550,22 +583,6 @@ $historyText
                         if (!isFromOther) _suggestedReplies.clear();
                       });
 
-                      if (_scrollController.hasClients) {
-                        if (isFirstLoad) {
-                          // 初回: アニメーションなしで即座に最下部へ
-                          _scrollController.jumpTo(
-                            _scrollController.position.maxScrollExtent,
-                          );
-                        } else {
-                          // 新着メッセージ: スムーズにスクロール
-                          _scrollController.animateTo(
-                            _scrollController.position.maxScrollExtent,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOut,
-                          );
-                        }
-                      }
-
                       // 初回ロードはAPIを叩かない。相手のメッセージが来た時だけ生成
                       if (!isFirstLoad && isFromOther) {
                         _fetchSmartReplies(docs.map((d) => d.data()).toList());
@@ -575,6 +592,7 @@ $historyText
                 }
 
                 return ListView.builder(
+                  reverse: true,
                   controller: _scrollController,
                   padding: EdgeInsets.fromLTRB(
                     12, 12, 12,
