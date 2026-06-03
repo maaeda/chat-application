@@ -4,10 +4,12 @@ import 'screens/chat_list_screen.dart';
 import 'screens/settings_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'firebase_options.dart';
 import 'post.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'models/chat_model.dart';
+import 'package:chat_application/services/ai_backend_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +22,11 @@ void main() async {
       androidProvider: AndroidProvider.playIntegrity,
     );
   }
+  // FlutterGemma の初期化（ローカルLLM機能の事前準備）
+  final hfToken = await AiBackendService.getHuggingFaceToken();
+  await FlutterGemma.initialize(
+    huggingFaceToken: hfToken.isNotEmpty ? hfToken : null,
+  );
   runApp(const MyApp());
 }
 

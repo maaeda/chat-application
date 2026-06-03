@@ -123,3 +123,5 @@ app.*.symbols
 
 # AI Assistant memory/logs
 .junie/
+
+*.md
