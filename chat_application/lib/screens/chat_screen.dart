@@ -735,8 +735,8 @@ AIアシスタントの次の返答:
                         if (!isFromOther) _suggestedReplies.clear();
                       });
 
-                      // 初回ロードはAPIを叩かない。相手のメッセージが来た時だけ生成
-                      if (!_isAiDemoChat && !isFirstLoad && isFromOther) {
+                      // 初回ロードはAPIを叩かない。相手のメッセージ（通常チャットの他メンバーやAIアシスタント）が来た時だけ生成
+                      if (!isFirstLoad && isFromOther) {
                         _fetchSmartReplies(docs.map((d) => d.data()).toList());
                       }
                     });
