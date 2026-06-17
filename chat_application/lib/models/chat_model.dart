@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ChatModel {
+  static const typeNormal = 'normal';
+  static const typeAiDemo = 'ai_demo';
+
   ChatModel({
     required this.name,
     required this.avatarUrl,
@@ -8,9 +11,12 @@ class ChatModel {
     required this.updatedAt,
     required this.participants,
     required this.reference,
+    this.type = typeNormal,
   });
 
-  factory ChatModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+  factory ChatModel.fromFirestore(
+    DocumentSnapshot<Map<String, dynamic>> snapshot,
+  ) {
     final map = snapshot.data() ?? {};
     return ChatModel(
       name: map['name'] ?? '',
@@ -19,6 +25,7 @@ class ChatModel {
       updatedAt: map['updatedAt'] ?? Timestamp.now(),
       participants: List<String>.from(map['participants'] ?? []),
       reference: snapshot.reference,
+      type: map['type'] ?? typeNormal,
     );
   }
 
@@ -29,6 +36,7 @@ class ChatModel {
       'lastMessage': lastMessage,
       'updatedAt': updatedAt,
       'participants': participants,
+      'type': type,
     };
   }
 
@@ -38,5 +46,8 @@ class ChatModel {
   final Timestamp updatedAt;
   final List<String> participants;
   final DocumentReference reference;
+  final String type;
+
+  bool get isAiDemo => type == typeAiDemo;
 }
 

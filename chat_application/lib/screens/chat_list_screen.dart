@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/chat_model.dart';
 import '../main.dart';
+import '../post.dart';
 import '../widgets/profile_avatar.dart';
 import 'package:intl/intl.dart';
 
@@ -62,12 +63,95 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
+  Future<void> _openAiDemoChat() async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ログインが必要です')));
+      return;
+    }
+
+    try {
+      final snapshot = await chatsReference
+          .where('participants', arrayContains: currentUser.uid)
+          .get();
+
+      for (final doc in snapshot.docs) {
+        final chat = doc.data();
+        if (chat.isAiDemo) {
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatScreen(
+                chatId: doc.id,
+                name: chat.name,
+                chatType: chat.type,
+              ),
+            ),
+          );
+          return;
+        }
+      }
+
+      final now = Timestamp.now();
+      final newChatDoc = chatsReference.doc();
+      final chatModel = ChatModel(
+        name: 'AIアシスタント',
+        avatarUrl: '',
+        lastMessage: 'こんにちは。今日はどんなことを相談しますか？',
+        updatedAt: now,
+        participants: [currentUser.uid, 'ai_assistant'],
+        reference: newChatDoc,
+        type: ChatModel.typeAiDemo,
+      );
+
+      await newChatDoc.set(chatModel);
+
+      final firstPostDoc = postsReferenceFor(newChatDoc.id).doc();
+      await firstPostDoc.set(
+        Post(
+          text: 'こんにちは。今日はどんなことを相談しますか？',
+          createdAt: now,
+          posterName: 'AIアシスタント',
+          posterImageUrl: '',
+          posterId: 'ai_assistant',
+          reference: firstPostDoc,
+        ),
+      );
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(
+            chatId: newChatDoc.id,
+            name: chatModel.name,
+            chatType: chatModel.type,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('AIデモチャットの作成に失敗しました: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('チャット一覧'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.smart_toy),
+            tooltip: 'AIデモチャット',
+            onPressed: _openAiDemoChat,
+          ),
           // tap 可能にするために InkWell を使います。
           InkWell(
             onTap: () {
@@ -130,8 +214,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) =>
-                          ChatScreen(chatId: chatId, name: chat.name),
+                      builder: (context) => ChatScreen(
+                        chatId: chatId,
+                        name: chat.name,
+                        chatType: chat.type,
+                      ),
                     ),
                   );
                 },
@@ -272,6 +359,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         updatedAt: Timestamp.now(),
                         participants: participants,
                         reference: newChatDoc,
+                        type: ChatModel.typeNormal,
                       );
 
                       await newChatDoc.set(chatModel);

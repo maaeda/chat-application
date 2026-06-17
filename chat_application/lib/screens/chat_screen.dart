@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:chat_application/main.dart';
+import 'package:chat_application/models/chat_model.dart';
 import 'package:chat_application/post.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -14,8 +15,14 @@ import 'package:chat_application/widgets/profile_avatar.dart';
 class ChatScreen extends StatefulWidget {
   final String chatId;
   final String name;
+  final String chatType;
 
-  const ChatScreen({super.key, required this.chatId, required this.name});
+  const ChatScreen({
+    super.key,
+    required this.chatId,
+    required this.name,
+    this.chatType = ChatModel.typeNormal,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -26,7 +33,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   List<String> _suggestedReplies = [];
   bool _isFetchingSuggestions = false;
+  bool _isAiReplying = false;
   String? _lastProcessedMessageId;
+  bool get _isAiDemoChat => widget.chatType == ChatModel.typeAiDemo;
   bool _initialLoadComplete = false; // 初回ロード完了フラグ
 
   @override
@@ -200,6 +209,116 @@ $historyText
     }
   }
 
+  Future<String> _generateAiText(String prompt, {int maxTokens = 1024}) async {
+    const apiKey = String.fromEnvironment('GEMINI_API_KEY');
+    final backend = await AiBackendService.getBackend();
+    final effectiveBackend = (backend == AiBackend.googleAi && apiKey.isEmpty)
+        ? AiBackend.firebaseAi
+        : backend;
+
+    switch (effectiveBackend) {
+      case AiBackend.googleAi:
+        final model = google_ai.GenerativeModel(
+          model: 'gemini-2.5-flash',
+          apiKey: apiKey,
+        );
+        final response = await model.generateContent([
+          google_ai.Content.text(prompt),
+        ]);
+        return response.text?.trim() ?? '';
+
+      case AiBackend.firebaseAi:
+        final model = firebase_ai.FirebaseAI.googleAI().generativeModel(
+          model: 'gemini-2.5-flash',
+        );
+        final response = await model.generateContent([
+          firebase_ai.Content.text(prompt),
+        ]);
+        return response.text?.trim() ?? '';
+
+      case AiBackend.localLlm:
+        if (!FlutterGemma.hasActiveModel()) {
+          throw Exception('ローカルLLMモデルが未インストールです。設定画面からダウンロードしてください。');
+        }
+        final inferenceModel = await FlutterGemma.getActiveModel(
+          maxTokens: maxTokens,
+        );
+        final session = await inferenceModel.createSession();
+        await session.addQueryChunk(Message(text: prompt, isUser: true));
+        final text = await session.getResponse();
+        await session.close();
+        return text.trim();
+    }
+  }
+
+  Future<void> _sendAiDemoReply() async {
+    if (_isAiReplying) return;
+
+    setState(() {
+      _isAiReplying = true;
+      _suggestedReplies.clear();
+    });
+
+    try {
+      final snapshot = await postsReferenceFor(widget.chatId)
+          .orderBy('createdAt', descending: true)
+          .limit(12)
+          .get();
+
+      final history = snapshot.docs.map((doc) => doc.data()).toList().reversed;
+      final historyText = history
+          .map((post) => '${post.posterName}: ${post.text}')
+          .join('\n');
+
+      final prompt =
+          '''
+あなたはチャットアプリのデモ用AIアシスタントです。
+ユーザーと自然な日本語で会話してください。
+返答は1〜3文で短く、親しみやすく、具体的にしてください。
+Markdown、箇条書き、JSONは使わないでください。
+
+会話履歴:
+$historyText
+
+AIアシスタントの次の返答:
+''';
+
+      var aiText = await _generateAiText(prompt, maxTokens: 512);
+      aiText = aiText
+          .replaceAll(RegExp(r'```.*?```', dotAll: true), '')
+          .replaceAll(RegExp(r'^AIアシスタント[:：]\s*'), '')
+          .trim();
+
+      if (aiText.isEmpty) {
+        aiText = 'すみません、うまく返答を作れませんでした。もう一度送ってください。';
+      }
+
+      final newDoc = postsReferenceFor(widget.chatId).doc();
+      await newDoc.set(
+        Post(
+          text: aiText,
+          createdAt: Timestamp.now(),
+          posterName: 'AIアシスタント',
+          posterImageUrl: '',
+          posterId: 'ai_assistant',
+          reference: newDoc,
+        ),
+      );
+      await _updateChatMetadata(aiText);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('AI返信の生成に失敗しました: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAiReplying = false;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _controller.removeListener(_onTextChanged);
@@ -268,6 +387,9 @@ $historyText
       if (mounted) _controller.clear();
       // Update chat metadata (lastMessage, updatedAt)
       await _updateChatMetadata(trimmed);
+      if (_isAiDemoChat) {
+        await _sendAiDemoReply();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -614,7 +736,7 @@ $historyText
                       });
 
                       // 初回ロードはAPIを叩かない。相手のメッセージが来た時だけ生成
-                      if (!isFirstLoad && isFromOther) {
+                      if (!_isAiDemoChat && !isFirstLoad && isFromOther) {
                         _fetchSmartReplies(docs.map((d) => d.data()).toList());
                       }
                     });
@@ -629,7 +751,9 @@ $historyText
                     12,
                     12,
                     // サジェスト欄が表示中は下部に余白を追加
-                    (_isFetchingSuggestions || _suggestedReplies.isNotEmpty)
+                    (_isAiReplying ||
+                            _isFetchingSuggestions ||
+                            _suggestedReplies.isNotEmpty)
                         ? 62
                         : 12,
                   ),
@@ -743,12 +867,29 @@ $historyText
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_isFetchingSuggestions || _suggestedReplies.isNotEmpty)
+                if (_isAiReplying ||
+                    _isFetchingSuggestions ||
+                    _suggestedReplies.isNotEmpty)
                   Container(
                     height: 50,
                     padding: const EdgeInsets.symmetric(horizontal: 8.0),
                     alignment: Alignment.centerLeft,
-                    child: _isFetchingSuggestions
+                    child: _isAiReplying
+                        ? const Row(
+                            children: [
+                              SizedBox(width: 8),
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              SizedBox(width: 12),
+                              Text('AIが入力中...'),
+                            ],
+                          )
+                        : _isFetchingSuggestions
                         ? const Padding(
                             padding: EdgeInsets.only(left: 8.0),
                             child: SizedBox(
