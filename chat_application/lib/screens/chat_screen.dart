@@ -9,6 +9,7 @@ import 'package:firebase_ai/firebase_ai.dart' as firebase_ai;
 import 'package:google_generative_ai/google_generative_ai.dart' as google_ai;
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:chat_application/services/ai_backend_service.dart';
+import 'package:chat_application/widgets/profile_avatar.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -58,8 +59,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final history = recentPosts.length > 10
           ? recentPosts.sublist(0, 10).reversed.toList()
           : recentPosts.reversed.toList();
-      final historyText =
-          history.map((p) => '${p.posterName}: ${p.text}').join('\n');
+      final historyText = history
+          .map((p) => '${p.posterName}: ${p.text}')
+          .join('\n');
 
       // 設定画面からのバックエンド設定を優先、次にAPIKeyの有無で判定
       final effectiveBackend = (backend == AiBackend.googleAi && apiKey.isEmpty)
@@ -68,7 +70,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
       String prompt = '';
       if (effectiveBackend == AiBackend.localLlm) {
-        prompt = '''
+        prompt =
+            '''
 Task: Suggest 3 short and natural Japanese replies based on the chat history below.
 DO NOT use JSON. DO NOT use quotes. Just output exactly 3 lines of Japanese text, one option per line.
 
@@ -78,7 +81,8 @@ $historyText
 Suggested replies (in Japanese):
 1. ''';
       } else {
-        prompt = '''
+        prompt =
+            '''
 あなたはチャットアプリの返信サジェスト生成アシスタントです。
 直近の会話履歴から、ユーザーが次に返信しそうな自然なフレーズを3つ提案してください。
 必ず以下のJSON配列形式のみを返してください。余計なテキストやMarkdownは一切含めないでください。
@@ -98,8 +102,9 @@ $historyText
             model: 'gemini-2.5-flash',
             apiKey: apiKey,
           );
-          final response =
-              await model.generateContent([google_ai.Content.text(prompt)]);
+          final response = await model.generateContent([
+            google_ai.Content.text(prompt),
+          ]);
           text = response.text;
 
         case AiBackend.firebaseAi:
@@ -107,8 +112,9 @@ $historyText
           final model = firebase_ai.FirebaseAI.googleAI().generativeModel(
             model: 'gemini-2.5-flash',
           );
-          final response =
-              await model.generateContent([firebase_ai.Content.text(prompt)]);
+          final response = await model.generateContent([
+            firebase_ai.Content.text(prompt),
+          ]);
           text = response.text;
 
         case AiBackend.localLlm:
@@ -117,7 +123,9 @@ $historyText
             errorMessage = 'モデルが未インストールです。設定画面からダウンロードしてください。';
             return;
           }
-          final inferenceModel = await FlutterGemma.getActiveModel(maxTokens: 1024);
+          final inferenceModel = await FlutterGemma.getActiveModel(
+            maxTokens: 1024,
+          );
           final session = await inferenceModel.createSession();
           await session.addQueryChunk(Message(text: prompt, isUser: true));
           text = await session.getResponse();
@@ -139,18 +147,23 @@ $historyText
       // JSONの先頭 '[' と末尾 ']' を抽出して安全にパース
       final startIdx = text.indexOf('[');
       final endIdx = text.lastIndexOf(']');
-      
+
       List<String> suggestions = [];
-      
+
       if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
         final jsonText = text.substring(startIdx, endIdx + 1);
         final List<dynamic> parsed = jsonDecode(jsonText);
         suggestions = parsed.map((e) => e.toString()).toList();
       } else {
         // フォールバック: 行ごとに分割してサジェストにする
-        final lines = text.split('\n')
-            .map((e) => e.replaceAll(RegExp(r'^[-*0-9.\s]+'), '')) // 行頭の箇条書き記号を削除
-            .map((e) => e.replaceAll(RegExp(r'[{}"\[\]:]+'), '')) // JSON由来の記号を削除 (英字は消さない)
+        final lines = text
+            .split('\n')
+            .map(
+              (e) => e.replaceAll(RegExp(r'^[-*0-9.\s]+'), ''),
+            ) // 行頭の箇条書き記号を削除
+            .map(
+              (e) => e.replaceAll(RegExp(r'[{}"\[\]:]+'), ''),
+            ) // JSON由来の記号を削除 (英字は消さない)
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty && e.length < 50)
             .take(3)
@@ -179,9 +192,9 @@ $historyText
           _isFetchingSuggestions = false;
         });
         if (errorMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(errorMessage!)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(errorMessage!)));
         }
       }
     }
@@ -209,7 +222,9 @@ $historyText
     } else if (messageDate == yesterday) {
       return '昨日 $time'; // 昨日: 昨日 HH:mm
     } else {
-      return DateFormat('yyyy/MM/dd HH:mm').format(dt); // それ以外: yyyy/MM/dd HH:mm
+      return DateFormat(
+        'yyyy/MM/dd HH:mm',
+      ).format(dt); // それ以外: yyyy/MM/dd HH:mm
     }
   }
 
@@ -231,9 +246,9 @@ $historyText
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ログインが必要です')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('ログインが必要です')));
       }
       return;
     }
@@ -255,9 +270,9 @@ $historyText
       await _updateChatMetadata(trimmed);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('送信に失敗しました: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('送信に失敗しました: $e')));
       }
     }
   }
@@ -268,7 +283,10 @@ $historyText
       builder: (context) => AlertDialog(
         title: const Text('メッセージを削除しますか？'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('キャンセル')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('キャンセル'),
+          ),
           TextButton(
             onPressed: () async {
               Navigator.of(context).pop();
@@ -276,9 +294,9 @@ $historyText
                 await postsReferenceFor(widget.chatId).doc(docId).delete();
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('削除に失敗しました: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('削除に失敗しました: $e')));
                 }
               }
             },
@@ -308,17 +326,19 @@ $historyText
               .get();
 
           _searchResults = snapshot.docs
-              .map((doc) => {
-                'uid': doc.id,
-                'email': (doc['email'] ?? '') as String,
-                'name': (doc['displayName'] ?? 'Unknown') as String,
-              })
+              .map(
+                (doc) => {
+                  'uid': doc.id,
+                  'email': (doc['email'] ?? '') as String,
+                  'name': (doc['displayName'] ?? 'Unknown') as String,
+                },
+              )
               .toList();
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('検索に失敗しました: $e')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('検索に失敗しました: $e')));
           }
         }
       }
@@ -349,7 +369,8 @@ $historyText
                   ),
                   const SizedBox(height: 12),
                   // 検索結果リスト
-                  if (_searchResults.isEmpty && _searchController.text.isNotEmpty)
+                  if (_searchResults.isEmpty &&
+                      _searchController.text.isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.all(8.0),
                       child: Text('検索結果がありません'),
@@ -374,7 +395,8 @@ $historyText
                                   if (!_selectedNewMembers.contains(uid)) {
                                     _selectedNewMembers.add(uid);
                                     // ユーザー情報も保存（タグ表示時に使用）
-                                    _selectedNewMembersInfo[uid] = user['name'] ?? 'Unknown';
+                                    _selectedNewMembersInfo[uid] =
+                                        user['name'] ?? 'Unknown';
                                   }
                                 } else {
                                   _selectedNewMembers.remove(uid);
@@ -393,20 +415,18 @@ $historyText
                       padding: const EdgeInsets.all(8.0),
                       child: Wrap(
                         spacing: 8,
-                        children: _selectedNewMembers
-                            .map((uid) {
-                              // 保存されたユーザー情報から名前を取得（検索結果が空でも大丈夫）
-                              final name = _selectedNewMembersInfo[uid] ?? uid;
-                              return Chip(
-                                label: Text(name),
-                                deleteIcon: const Icon(Icons.close),
-                                onDeleted: () => setState(() {
-                                  _selectedNewMembers.remove(uid);
-                                  _selectedNewMembersInfo.remove(uid);
-                                }),
-                              );
-                            })
-                            .toList(),
+                        children: _selectedNewMembers.map((uid) {
+                          // 保存されたユーザー情報から名前を取得（検索結果が空でも大丈夫）
+                          final name = _selectedNewMembersInfo[uid] ?? uid;
+                          return Chip(
+                            label: Text(name),
+                            deleteIcon: const Icon(Icons.close),
+                            onDeleted: () => setState(() {
+                              _selectedNewMembers.remove(uid);
+                              _selectedNewMembersInfo.remove(uid);
+                            }),
+                          );
+                        }).toList(),
                       ),
                     ),
                 ],
@@ -426,7 +446,9 @@ $historyText
 
                   try {
                     // 現在の participants を取得
-                    final chatDoc = await chatsReference.doc(widget.chatId).get();
+                    final chatDoc = await chatsReference
+                        .doc(widget.chatId)
+                        .get();
                     final chat = chatDoc.data();
                     if (chat == null) {
                       Navigator.of(context).pop();
@@ -434,7 +456,10 @@ $historyText
                     }
 
                     // 新しい participants（重複を避ける）
-                    final updatedParticipants = {...chat.participants, ..._selectedNewMembers}.toList();
+                    final updatedParticipants = {
+                      ...chat.participants,
+                      ..._selectedNewMembers,
+                    }.toList();
 
                     // participants を更新
                     await chatsReference.doc(widget.chatId).update({
@@ -477,7 +502,10 @@ $historyText
       final members = <Map<String, String>>[];
       for (final uid in participantUids) {
         try {
-          final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .get();
           final userData = userDoc.data() ?? {};
           members.add({
             'uid': uid,
@@ -502,35 +530,35 @@ $historyText
                 itemCount: members.length,
                 itemBuilder: (context, index) {
                   final member = members[index];
-                  final isMe = member['uid'] == FirebaseAuth.instance.currentUser?.uid;
+                  final isMe =
+                      member['uid'] == FirebaseAuth.instance.currentUser?.uid;
 
                   // メンバーのアイコン（photoURL またはイニシャル）
-                  final avatar = member['photoURL']!.isNotEmpty
-                      ? CircleAvatar(
-                          backgroundImage: NetworkImage(member['photoURL']!),
-                          onBackgroundImageError: (_, __) {},
-                        )
-                      : CircleAvatar(child: Text(member['name']?.substring(0, 1) ?? '?'));
-
                   return ListTile(
                     title: Text('${member['name']}${isMe ? ' (あなた)' : ''}'),
                     subtitle: Text(member['email'] ?? ''),
-                    leading: avatar,
+                    leading: ProfileAvatar(
+                      imageUrl: member['photoURL'],
+                      name: member['name'],
+                    ),
                   );
                 },
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('閉じる')),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('閉じる'),
+              ),
             ],
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('メンバー情報取得失敗: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('メンバー情報取得失敗: $e')));
       }
     }
   }
@@ -560,7 +588,9 @@ $historyText
         children: [
           Expanded(
             child: StreamBuilder<QuerySnapshot<Post>>(
-              stream: postsReferenceFor(widget.chatId).orderBy('createdAt', descending: true).snapshots(),
+              stream: postsReferenceFor(
+                widget.chatId,
+              ).orderBy('createdAt', descending: true).snapshots(),
               builder: (context, snapshot) {
                 final docs = snapshot.data?.docs ?? [];
 
@@ -595,37 +625,60 @@ $historyText
                   reverse: true,
                   controller: _scrollController,
                   padding: EdgeInsets.fromLTRB(
-                    12, 12, 12,
+                    12,
+                    12,
+                    12,
                     // サジェスト欄が表示中は下部に余白を追加
-                    (_isFetchingSuggestions || _suggestedReplies.isNotEmpty) ? 62 : 12,
+                    (_isFetchingSuggestions || _suggestedReplies.isNotEmpty)
+                        ? 62
+                        : 12,
                   ),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final doc = docs[index];
                     final post = doc.data();
-                    final isMe = currentUid != null && post.posterId == currentUid;
+                    final isMe =
+                        currentUid != null && post.posterId == currentUid;
 
-                    final avatar = post.posterImageUrl.isNotEmpty
-                        ? CircleAvatar(
-                            backgroundImage: NetworkImage(post.posterImageUrl),
-                            onBackgroundImageError: (_, __) {},
-                          )
-                        : CircleAvatar(child: Text((post.posterName.isNotEmpty ? post.posterName[0] : '?')));
+                    final avatar = ProfileAvatar(
+                      imageUrl: post.posterImageUrl,
+                      name: post.posterName,
+                    );
 
                     // 名前はバブルの外に表示し、バブルは本文と日時だけを囲む
                     final bubble = Container(
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.7,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 12,
+                      ),
                       decoration: BoxDecoration(
-                        color: isMe ? Theme.of(context).colorScheme.primary : Colors.grey.shade200,
+                        color: isMe
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.grey.shade200,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(post.text, style: TextStyle(color: isMe ? Theme.of(context).colorScheme.onPrimary : Colors.black)),
+                          Text(
+                            post.text,
+                            style: TextStyle(
+                              color: isMe
+                                  ? Theme.of(context).colorScheme.onPrimary
+                                  : Colors.black,
+                            ),
+                          ),
                           const SizedBox(height: 6),
-                          Text(_formatTimestamp(post.createdAt), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                          Text(
+                            _formatTimestamp(post.createdAt),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
                         ],
                       ),
                     );
@@ -633,15 +686,26 @@ $historyText
                     // 名前（投稿者）が必要な場合はバブルの外、上に表示する
                     final nameWidget = !isMe
                         ? Padding(
-                            padding: const EdgeInsets.only(bottom: 4.0, left: 0),
-                            child: Text(post.posterName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            padding: const EdgeInsets.only(
+                              bottom: 4.0,
+                              left: 0,
+                            ),
+                            child: Text(
+                              post.posterName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
                           )
                         : const SizedBox.shrink();
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Row(
-                        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                        mainAxisAlignment: isMe
+                            ? MainAxisAlignment.end
+                            : MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (!isMe) avatar,
@@ -649,7 +713,9 @@ $historyText
                           // 名前＋バブルを縦に並べる
                           Flexible(
                             child: Column(
-                              crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              crossAxisAlignment: isMe
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
                               children: [
                                 nameWidget,
                                 GestureDetector(
@@ -685,12 +751,17 @@ $historyText
                     child: _isFetchingSuggestions
                         ? const Padding(
                             padding: EdgeInsets.only(left: 8.0),
-                            child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           )
                         : ListView.separated(
                             scrollDirection: Axis.horizontal,
                             itemCount: _suggestedReplies.length,
-                            separatorBuilder: (context, index) => const SizedBox(width: 8),
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(width: 8),
                             itemBuilder: (context, index) {
                               final text = _suggestedReplies[index];
                               return ActionChip(
@@ -706,7 +777,10 @@ $historyText
                           ),
                   ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8.0,
+                    vertical: 6.0,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -718,7 +792,10 @@ $historyText
                           decoration: const InputDecoration(
                             hintText: 'メッセージを入力',
                             border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                           ),
                         ),
                       ),
@@ -732,14 +809,13 @@ $historyText
                         ),
                       ),
                     ],
-              ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
           ),
         ],
       ),
     );
   }
 }
-

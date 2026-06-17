@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/chat_model.dart';
 import '../main.dart';
+import '../widgets/profile_avatar.dart';
 import 'package:intl/intl.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -42,17 +43,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
           .get();
 
       final results = snapshot.docs
-          .map((doc) => {
-            'uid': doc.id,
-            'email': (doc['email'] ?? '') as String,
-            'name': (doc['displayName'] ?? 'Unknown') as String,
-          })
+          .map(
+            (doc) => {
+              'uid': doc.id,
+              'email': (doc['email'] ?? '') as String,
+              'name': (doc['displayName'] ?? 'Unknown') as String,
+            },
+          )
           .toList();
 
       setState(() => _searchResults = results);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('検索に失敗しました: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('検索に失敗しました: $e')));
       }
     }
   }
@@ -68,24 +73,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
             onTap: () {
               // プロフィール画面などへの遷移を追加予定
             },
-            child: FirebaseAuth.instance.currentUser?.photoURL != null &&
-                    FirebaseAuth.instance.currentUser!.photoURL!.isNotEmpty
-                ? CircleAvatar(
-                    backgroundImage: NetworkImage(
-                      FirebaseAuth.instance.currentUser!.photoURL!,
-                    ),
-                    radius: 20,
-                  )
-                : const CircleAvatar(
-                    radius: 20,
-                    child: Icon(Icons.person),
-                  ),
-          )
+            child: ProfileAvatar(
+              imageUrl: FirebaseAuth.instance.currentUser?.photoURL,
+              name: FirebaseAuth.instance.currentUser?.displayName,
+              radius: 20,
+            ),
+          ),
         ],
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: StreamBuilder<QuerySnapshot<ChatModel>>(
-        stream: chatsReference.orderBy('updatedAt', descending: true).snapshots(),
+        stream: chatsReference
+            .orderBy('updatedAt', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
           final docs = snapshot.data?.docs ?? [];
           final currentUid = FirebaseAuth.instance.currentUser?.uid;
@@ -104,22 +104,34 @@ class _ChatListScreenState extends State<ChatListScreen> {
             itemBuilder: (context, index) {
               final chat = userChats[index].data();
               final chatId = userChats[index].id;
-              final time = DateFormat('yyyy/MM/dd HH:mm').format(chat.updatedAt.toDate());
-
-              final avatar = chat.avatarUrl.isNotEmpty
-                  ? CircleAvatar(backgroundImage: NetworkImage(chat.avatarUrl))
-                  : CircleAvatar(child: Text(chat.name.isNotEmpty ? chat.name[0] : '?'));
+              final time = DateFormat(
+                'yyyy/MM/dd HH:mm',
+              ).format(chat.updatedAt.toDate());
 
               return ListTile(
-                leading: avatar,
-                title: Text(chat.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(chat.lastMessage, maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: Text(time, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                leading: ProfileAvatar(
+                  imageUrl: chat.avatarUrl,
+                  name: chat.name,
+                ),
+                title: Text(
+                  chat.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  chat.lastMessage,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Text(
+                  time,
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => ChatScreen(chatId: chatId, name: chat.name),
+                      builder: (context) =>
+                          ChatScreen(chatId: chatId, name: chat.name),
                     ),
                   );
                 },
@@ -165,7 +177,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       ),
                       const SizedBox(height: 8),
                       // 検索結果リスト（結果がない場合はメッセージを表示）
-                      if (_searchResults.isEmpty && _searchController.text.isNotEmpty)
+                      if (_searchResults.isEmpty &&
+                          _searchController.text.isNotEmpty)
                         const Padding(
                           padding: EdgeInsets.all(8.0),
                           child: Text('検索結果がありません'),
@@ -179,7 +192,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             itemBuilder: (context, index) {
                               final user = _searchResults[index];
                               final uid = user['uid'] ?? '';
-                              final isSelected = _selectedParticipants.contains(uid);
+                              final isSelected = _selectedParticipants.contains(
+                                uid,
+                              );
                               return CheckboxListTile(
                                 title: Text(user['name'] ?? ''),
                                 subtitle: Text(user['email'] ?? ''),
@@ -187,7 +202,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 onChanged: (checked) {
                                   setState(() {
                                     if (checked == true) {
-                                      if (!_selectedParticipants.contains(uid)) {
+                                      if (!_selectedParticipants.contains(
+                                        uid,
+                                      )) {
                                         _selectedParticipants.add(uid);
                                       }
                                     } else {
@@ -206,19 +223,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           padding: const EdgeInsets.all(8.0),
                           child: Wrap(
                             spacing: 8,
-                            children: _selectedParticipants
-                                .map((uid) {
-                                  final user = _searchResults.firstWhere(
-                                    (u) => u['uid'] == uid,
-                                    orElse: () => {'name': uid, 'uid': uid},
-                                  );
-                                  return Chip(
-                                    label: Text(user['name'] ?? uid),
-                                    deleteIcon: const Icon(Icons.close),
-                                    onDeleted: () => setState(() => _selectedParticipants.remove(uid)),
-                                  );
-                                })
-                                .toList(),
+                            children: _selectedParticipants.map((uid) {
+                              final user = _searchResults.firstWhere(
+                                (u) => u['uid'] == uid,
+                                orElse: () => {'name': uid, 'uid': uid},
+                              );
+                              return Chip(
+                                label: Text(user['name'] ?? uid),
+                                deleteIcon: const Icon(Icons.close),
+                                onDeleted: () => setState(
+                                  () => _selectedParticipants.remove(uid),
+                                ),
+                              );
+                            }).toList(),
                           ),
                         ),
                     ],
@@ -235,12 +252,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       final currentUid = FirebaseAuth.instance.currentUser?.uid;
                       if (currentUid == null) {
                         Navigator.of(context).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ログインが必要です')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('ログインが必要です')),
+                        );
                         return;
                       }
 
                       // 参加者に現在のユーザーを追加
-                      final participants = {currentUid, ..._selectedParticipants}.toList();
+                      final participants = {
+                        currentUid,
+                        ..._selectedParticipants,
+                      }.toList();
 
                       final newChatDoc = chatsReference.doc();
                       final chatModel = ChatModel(

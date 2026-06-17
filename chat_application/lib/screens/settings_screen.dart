@@ -5,6 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:chat_application/services/ai_backend_service.dart';
+import 'package:chat_application/widgets/profile_avatar.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -64,7 +65,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // 全モデルのインストール状態を一括チェック
     final Map<String, bool> installed = {};
     for (final m in kLocalModels) {
-      installed[m.name] = await FlutterGemma.isModelInstalled(_getModelFileId(m));
+      installed[m.name] = await FlutterGemma.isModelInstalled(
+        _getModelFileId(m),
+      );
     }
 
     if (mounted) {
@@ -118,14 +121,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       await FlutterGemma.installModel(
         modelType: model.modelType,
-      ).fromNetwork(model.url)
-          .withProgress((p) {
-            if (mounted) setState(() => _downloadProgress = p / 100.0);
-          })
-          .install();
+      ).fromNetwork(model.url).withProgress((p) {
+        if (mounted) setState(() => _downloadProgress = p / 100.0);
+      }).install();
 
       // インストール状態を更新
-      final isInstalled = await FlutterGemma.isModelInstalled(_getModelFileId(model));
+      final isInstalled = await FlutterGemma.isModelInstalled(
+        _getModelFileId(model),
+      );
       if (mounted) {
         setState(() {
           _installedModels[model.name] = isInstalled;
@@ -195,9 +198,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('削除に失敗しました: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('削除に失敗しました: $e')));
       }
     }
   }
@@ -217,10 +220,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         GoogleAuthProvider authProvider = GoogleAuthProvider();
         await _auth.signInWithPopup(authProvider);
       } else {
-        final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
+        final GoogleSignInAccount googleUser = await _googleSignIn
+            .authenticate();
         final GoogleSignInAuthentication googleAuth = googleUser.authentication;
-        final authorization =
-            await googleUser.authorizationClient.authorizeScopes(['email']);
+        final authorization = await googleUser.authorizationClient
+            .authorizeScopes(['email']);
         final OAuthCredential credential = GoogleAuthProvider.credential(
           accessToken: authorization.accessToken,
           idToken: googleAuth.idToken,
@@ -229,22 +233,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
       final user = _auth.currentUser;
       if (user != null && mounted) {
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
-          {
-            'uid': user.uid,
-            'email': user.email,
-            'displayName': user.displayName,
-            'photoURL': user.photoURL,
-            'updatedAt': Timestamp.now(),
-          },
-          SetOptions(merge: true),
-        );
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'uid': user.uid,
+          'email': user.email,
+          'displayName': user.displayName,
+          'photoURL': user.photoURL,
+          'updatedAt': Timestamp.now(),
+        }, SetOptions(merge: true));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ログインに失敗しました: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('ログインに失敗しました: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -259,9 +260,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _auth.signOut();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('サインアウトに失敗しました: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('サインアウトに失敗しました: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -336,11 +337,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: isSelected ? 2 : 1,
                 ),
                 color: isSelected
-                    ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.06)
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.06)
                     : Theme.of(context).cardColor,
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Icon(
@@ -349,8 +355,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       color: isSelected
                           ? Theme.of(context).colorScheme.primary
                           : b.enabled
-                              ? Theme.of(context).iconTheme.color
-                              : Colors.grey,
+                          ? Theme.of(context).iconTheme.color
+                          : Colors.grey,
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -369,15 +375,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             b.subtitle,
                             style: TextStyle(
                               fontSize: 12,
-                              color: b.enabled ? Colors.grey : Colors.grey.shade400,
+                              color: b.enabled
+                                  ? Colors.grey
+                                  : Colors.grey.shade400,
                             ),
                           ),
                         ],
                       ),
                     ),
                     if (isSelected)
-                      Icon(Icons.check_circle,
-                          color: Theme.of(context).colorScheme.primary, size: 20),
+                      Icon(
+                        Icons.check_circle,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: 20,
+                      ),
                   ],
                 ),
               ),
@@ -404,8 +415,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Row(
                 children: [
-                  Icon(Icons.vpn_key_rounded,
-                      color: Theme.of(context).colorScheme.secondary, size: 18),
+                  Icon(
+                    Icons.vpn_key_rounded,
+                    color: Theme.of(context).colorScheme.secondary,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   const Text(
                     'HuggingFace アクセストークン',
@@ -413,7 +427,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.orange.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -442,13 +459,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _obscureToken ? Icons.visibility : Icons.visibility_off,
                       size: 18,
                     ),
-                    onPressed: () => setState(() => _obscureToken = !_obscureToken),
+                    onPressed: () =>
+                        setState(() => _obscureToken = !_obscureToken),
                   ),
                   border: const OutlineInputBorder(
                     borderRadius: BorderRadius.all(Radius.circular(8)),
                   ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                 ),
               ),
             ],
@@ -477,7 +497,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: isSelected ? colorScheme.primary : Theme.of(context).dividerColor,
+              color: isSelected
+                  ? colorScheme.primary
+                  : Theme.of(context).dividerColor,
               width: isSelected ? 2 : 1,
             ),
             color: isSelected
@@ -494,8 +516,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     // サイズバッジ
                     Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: isSelected
                             ? colorScheme.primary
@@ -507,7 +531,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: isSelected ? Colors.white : colorScheme.onSurfaceVariant,
+                          color: isSelected
+                              ? Colors.white
+                              : colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -527,7 +553,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         message: 'HFトークンとライセンス同意が必要',
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(20),
@@ -538,9 +566,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             children: [
                               Icon(Icons.lock, size: 10, color: Colors.orange),
                               SizedBox(width: 3),
-                              Text('要認証',
-                                  style: TextStyle(
-                                      fontSize: 10, color: Colors.orange)),
+                              Text(
+                                '要認証',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.orange,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -548,16 +580,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(width: 8),
                     // インストール済みアイコン
                     if (isInstalled && !isDownloading)
-                      const Icon(Icons.check_circle,
-                          color: Colors.green, size: 18),
+                      const Icon(
+                        Icons.check_circle,
+                        color: Colors.green,
+                        size: 18,
+                      ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text(
                   model.description,
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
                 // ── ダウンロード中 ──
                 if (isDownloading) ...[
@@ -577,7 +610,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Text(
                         '${(_downloadProgress * 100).toStringAsFixed(0)}%',
                         style: const TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.bold),
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -592,9 +627,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.red,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                         icon: const Icon(Icons.delete_outline, size: 16),
                         label: const Text('削除', style: TextStyle(fontSize: 13)),
@@ -611,8 +649,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: FilledButton.icon(
                       icon: const Icon(Icons.download_rounded, size: 18),
                       label: Text(
-                          'ダウンロード (${model.sizeLabel})',
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                        'ダウンロード (${model.sizeLabel})',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       onPressed: _downloadingModelName != null
                           ? null
                           : () => _downloadModel(model),
@@ -659,7 +698,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildSectionHeader('アカウント'),
                 if (_user == null)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
                     child: FilledButton.icon(
                       icon: const Icon(Icons.login),
                       label: const Text('Googleでサインイン'),
@@ -668,7 +710,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   )
                 else
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
                     child: Card(
                       elevation: 0,
                       shape: RoundedRectangleBorder(
@@ -679,26 +724,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           children: [
-                            if (_user!.photoURL != null)
-                              CircleAvatar(
-                                backgroundImage: NetworkImage(_user!.photoURL!),
-                                radius: 36,
-                              )
-                            else
-                              const CircleAvatar(
-                                radius: 36,
-                                child: Icon(Icons.person, size: 36),
-                              ),
+                            ProfileAvatar(
+                              imageUrl: _user!.photoURL,
+                              name: _user!.displayName,
+                              radius: 36,
+                            ),
                             const SizedBox(height: 12),
                             Text(
                               _user!.displayName ?? 'ユーザー',
                               style: const TextStyle(
-                                  fontSize: 17, fontWeight: FontWeight.bold),
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             Text(
                               _user!.email ?? '',
                               style: const TextStyle(
-                                  fontSize: 13, color: Colors.grey),
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
                             ),
                             const SizedBox(height: 16),
                             OutlinedButton.icon(
