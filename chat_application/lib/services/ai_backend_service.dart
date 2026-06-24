@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_gemma/core/di/service_registry.dart';
+import 'package:flutter_gemma/core/services/model_repository.dart' as repo;
+import 'package:flutter_gemma/core/domain/model_source.dart';
 
 enum AiBackend {
   googleAi,
@@ -139,10 +143,52 @@ class AiBackendService {
     final model = getModelByName(modelName);
     final fileId = model.url.split('/').last;
 
-    // ディスク上にインストールされているかチェック
-    final isInstalled = await FlutterGemma.isModelInstalled(fileId);
+    // ディスク上の物理ファイルの存在を確認
+    final registry = ServiceRegistry.instance;
+    final fs = registry.fileSystemService;
+    final targetPath = await fs.getReadTargetPath(fileId);
+    final file = File(targetPath);
+    final fileExists = await file.exists();
+
+    // インストール状態を確認
+    var isInstalled = await FlutterGemma.isModelInstalled(fileId);
     debugPrint('LocalLLM check: model=$modelName, fileId=$fileId, '
-        'installed=$isInstalled, active=${FlutterGemma.hasActiveModel()}');
+        'fileExists=$fileExists, installed=$isInstalled, active=${FlutterGemma.hasActiveModel()}');
+
+    // 物理ファイルが存在するが、リポジトリに登録されていない場合は、自動で登録（自己修復）
+    if (fileExists && !isInstalled) {
+      try {
+        debugPrint('LocalLLM: モデルファイルは存在しますが、メタデータが未登録です。自動登録を実行します。');
+        final sizeBytes = await file.length();
+        final modelInfo = repo.ModelInfo(
+          id: fileId,
+          source: ModelSource.network(model.url),
+          installedAt: DateTime.now(),
+          sizeBytes: sizeBytes,
+          type: repo.ModelType.inference,
+          hasLoraWeights: false,
+        );
+        await registry.modelRepository.saveModel(modelInfo);
+        isInstalled = true;
+        debugPrint('LocalLLM: 自動登録が完了しました。');
+      } catch (e) {
+        debugPrint('LocalLLM: メタデータの自動登録に失敗しました: $e');
+      }
+    }
+
+    // 物理ファイルが存在しない場合は、未インストールとみなす
+    if (!fileExists) {
+      // もしリポジトリにだけ残っている場合はクリーンアップする
+      if (isInstalled) {
+        debugPrint('LocalLLM: メタデータは存在しますが、物理ファイルがありません。クリーンアップします。');
+        try {
+          await registry.modelRepository.deleteModel(fileId);
+        } catch (e) {
+          debugPrint('LocalLLM: メタデータ削除失敗: $e');
+        }
+      }
+      return false;
+    }
 
     if (!isInstalled) return false;
 

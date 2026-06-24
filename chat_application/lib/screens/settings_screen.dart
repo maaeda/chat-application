@@ -1,9 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_gemma/core/di/service_registry.dart';
+import 'package:flutter_gemma/core/services/model_repository.dart' as repo;
+import 'package:flutter_gemma/core/domain/model_source.dart';
 import 'package:chat_application/services/ai_backend_service.dart';
 import 'package:chat_application/widgets/profile_avatar.dart';
 
@@ -62,12 +66,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final modelName = await AiBackendService.getSelectedModelName();
     final hfToken = await AiBackendService.getHuggingFaceToken();
 
-    // 全モデルのインストール状態を一括チェック
+    // 全モデルのインストール状態を一括チェック（自己修復ロジック付き）
     final Map<String, bool> installed = {};
+    final registry = ServiceRegistry.instance;
+    final fs = registry.fileSystemService;
+
     for (final m in kLocalModels) {
-      installed[m.name] = await FlutterGemma.isModelInstalled(
-        _getModelFileId(m),
-      );
+      final fileId = _getModelFileId(m);
+      final targetPath = await fs.getReadTargetPath(fileId);
+      final file = File(targetPath);
+      final fileExists = await file.exists();
+      var isInstalled = await FlutterGemma.isModelInstalled(fileId);
+
+      if (fileExists && !isInstalled) {
+        try {
+          debugPrint('LocalLLM Settings: モデルファイルは存在しますが、メタデータが未登録です。自動登録を実行します。');
+          final sizeBytes = await file.length();
+          final modelInfo = repo.ModelInfo(
+            id: fileId,
+            source: ModelSource.network(m.url),
+            installedAt: DateTime.now(),
+            sizeBytes: sizeBytes,
+            type: repo.ModelType.inference,
+            hasLoraWeights: false,
+          );
+          await registry.modelRepository.saveModel(modelInfo);
+          isInstalled = true;
+        } catch (e) {
+          debugPrint('LocalLLM Settings: メタデータの自動登録に失敗しました: $e');
+        }
+      } else if (!fileExists && isInstalled) {
+        try {
+          await registry.modelRepository.deleteModel(fileId);
+          isInstalled = false;
+        } catch (e) {
+          debugPrint('LocalLLM Settings: メタデータ削除に失敗しました: $e');
+        }
+      }
+
+      installed[m.name] = isInstalled;
     }
 
     if (mounted) {

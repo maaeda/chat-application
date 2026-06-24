@@ -121,6 +121,59 @@ $text
 変換後:''';
   }
 
+  /// ローカルLLMなどの小型モデル向けに、簡素化した Few-shot プロンプトを生成する
+  static String _buildFewShotPrompt(String text, TransformStyle style) {
+    final (instruction, inputExample, outputExample) = switch (style) {
+      TransformStyle.casual => (
+          'カジュアルな口調（タメ口・親しみやすい表現）に変換してください。',
+          '今日は雨が降っています。',
+          '今日は雨だねー。',
+        ),
+      TransformStyle.polite => (
+          'です・ます調の丁寧な敬語表現に変換してください。',
+          '今日は雨が降っている。',
+          '今日は雨が降っています。',
+        ),
+      TransformStyle.business => (
+          'ビジネスメールに適した丁寧で簡潔なフォーマル表現に変換してください。',
+          '今日雨が降ってるから遅れる。',
+          '本日は降雨のため、到着が遅れる見込みです。何卒ご容赦ください。',
+        ),
+      TransformStyle.gentle => (
+          '柔らかく優しい、相手を気遣う温かみのある表現に変換してください。',
+          '今日は雨が降っています。',
+          '今日は雨が降っていますね。足元に気をつけてお出かけください。',
+        ),
+      TransformStyle.summarize => (
+          '元の意味を保ちつつ、できるだけ短く簡潔に要約してください。',
+          '今日は雨が降っていて、傘を忘れてしまったのでずぶ濡れになってしまいました。',
+          '雨の中、傘を忘れて濡れてしまった。',
+        ),
+      TransformStyle.aiCharacter => (
+          'ロボット・AI風のカタカナ交じりの機械的な口調に変換してください。',
+          '今日は雨が降っています。',
+          'キョウハ 雨ガ 降ッテイマス。',
+        ),
+      TransformStyle.butler => (
+          '「お嬢様/旦那様」に語りかける非常に丁寧な執事口調に変換してください。',
+          '今日は雨が降っています。',
+          '旦那様、本日は雨が降っております。お出かけの際はお気をつけくださいませ。',
+        ),
+      TransformStyle.teacher => (
+          '学校の先生が優しく教え諭すような口調に変換してください。',
+          '今日は雨が降っています。',
+          '今日は雨が降っていますね。みんな、傘を持ってきましたか？',
+        ),
+    };
+
+    return '''
+指示: $instruction
+入力: $inputExample
+出力: $outputExample
+入力: $text
+出力:''';
+  }
+
   /// テキストをAIで変換する
   static Future<String> transformText(
     String text,
@@ -129,8 +182,6 @@ $text
     if (text.trim().isEmpty) {
       throw Exception('変換するテキストがありません');
     }
-
-    final prompt = _buildPrompt(text, style);
 
     const apiKey = String.fromEnvironment('GEMINI_API_KEY');
     final backend = await AiBackendService.getBackend();
@@ -142,6 +193,7 @@ $text
 
     switch (effectiveBackend) {
       case AiBackend.googleAi:
+        final prompt = _buildPrompt(text, style);
         final model = google_ai.GenerativeModel(
           model: 'gemini-2.5-flash',
           apiKey: apiKey,
@@ -152,6 +204,7 @@ $text
         result = response.text?.trim();
 
       case AiBackend.firebaseAi:
+        final prompt = _buildPrompt(text, style);
         final model = firebase_ai.FirebaseAI.googleAI().generativeModel(
           model: 'gemini-2.5-flash',
         );
@@ -161,6 +214,7 @@ $text
         result = response.text?.trim();
 
       case AiBackend.localLlm:
+        final prompt = _buildFewShotPrompt(text, style);
         final isReady = await AiBackendService.ensureLocalModelReady();
         if (!isReady) {
           throw Exception('ローカルLLMモデルが未インストールです。設定画面からダウンロードしてください。');
