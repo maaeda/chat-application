@@ -27,6 +27,8 @@ void main() async {
   await FlutterGemma.initialize(
     huggingFaceToken: hfToken.isNotEmpty ? hfToken : null,
   );
+  // ローカルLLMが選択されている場合、モデルを自動ロード
+  await AiBackendService.loadLocalModelOnStartup();
   runApp(const MyApp());
 }
 

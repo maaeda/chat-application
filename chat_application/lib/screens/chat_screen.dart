@@ -10,7 +10,10 @@ import 'package:firebase_ai/firebase_ai.dart' as firebase_ai;
 import 'package:google_generative_ai/google_generative_ai.dart' as google_ai;
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:chat_application/services/ai_backend_service.dart';
+import 'package:chat_application/services/ai_text_transform_service.dart';
 import 'package:chat_application/widgets/profile_avatar.dart';
+import 'package:chat_application/widgets/ai_transform_bottom_sheet.dart';
+import 'package:chat_application/widgets/ai_transform_preview_dialog.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -34,6 +37,7 @@ class _ChatScreenState extends State<ChatScreen> {
   List<String> _suggestedReplies = [];
   bool _isFetchingSuggestions = false;
   bool _isAiReplying = false;
+  bool _isTransforming = false;
   String? _lastProcessedMessageId;
   bool get _isAiDemoChat => widget.chatType == ChatModel.typeAiDemo;
   bool _initialLoadComplete = false; // 初回ロード完了フラグ
@@ -128,7 +132,8 @@ $historyText
 
         case AiBackend.localLlm:
           // --- ローカルLLM (flutter_gemma) ---
-          if (!FlutterGemma.hasActiveModel()) {
+          final isReady = await AiBackendService.ensureLocalModelReady();
+          if (!isReady) {
             errorMessage = 'モデルが未インストールです。設定画面からダウンロードしてください。';
             return;
           }
@@ -237,7 +242,8 @@ $historyText
         return response.text?.trim() ?? '';
 
       case AiBackend.localLlm:
-        if (!FlutterGemma.hasActiveModel()) {
+        final isReady = await AiBackendService.ensureLocalModelReady();
+        if (!isReady) {
           throw Exception('ローカルLLMモデルが未インストールです。設定画面からダウンロードしてください。');
         }
         final inferenceModel = await FlutterGemma.getActiveModel(
@@ -315,6 +321,105 @@ AIアシスタントの次の返答:
         setState(() {
           _isAiReplying = false;
         });
+      }
+    }
+  }
+
+  /// AI変換ボトムシートを表示し、変換フローを開始する
+  Future<void> _showTransformBottomSheet() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+
+    final style = await AiTransformBottomSheet.show(context);
+    if (style == null || !mounted) return;
+
+    await _performTransform(text, style);
+  }
+
+  /// AIでテキストを変換し、プレビューダイアログを表示する
+  Future<void> _performTransform(String originalText, TransformStyle style) async {
+    // 変換中のローディングダイアログを表示
+    setState(() => _isTransforming = true);
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: Center(
+          child: Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('AIで変換中...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final transformedText = await AiTextTransformService.transformText(
+        originalText,
+        style,
+      );
+
+      // ローディングダイアログを閉じる
+      if (mounted) Navigator.of(context).pop();
+      setState(() => _isTransforming = false);
+
+      if (!mounted) return;
+
+      // スタイル情報を取得
+      final styleInfo = kTransformStyles.firstWhere(
+        (s) => s.style == style,
+      );
+
+      // プレビューダイアログを表示
+      final action = await AiTransformPreviewDialog.show(
+        context,
+        originalText: originalText,
+        transformedText: transformedText,
+        styleInfo: styleInfo,
+      );
+
+      if (!mounted) return;
+
+      switch (action) {
+        case TransformPreviewAction.apply:
+          // 変換後テキストを入力欄にセット
+          _controller.text = transformedText;
+          _controller.selection = TextSelection.fromPosition(
+            TextPosition(offset: transformedText.length),
+          );
+          break;
+        case TransformPreviewAction.retry:
+          // 再度ボトムシートを表示
+          await _showTransformBottomSheet();
+          break;
+        case TransformPreviewAction.cancel:
+        case null:
+          // 何もしない（元のテキストのまま）
+          break;
+      }
+    } catch (e) {
+      // ローディングダイアログを閉じる
+      if (mounted) Navigator.of(context).pop();
+      setState(() => _isTransforming = false);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('AI変換に失敗しました: $e')),
+        );
       }
     }
   }
@@ -924,6 +1029,25 @@ AIアシスタントの次の返答:
                   ),
                   child: Row(
                     children: [
+                      // AI変換ボタン
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _controller,
+                        builder: (context, value, child) {
+                          final hasText = value.text.trim().isNotEmpty;
+                          return IconButton(
+                            icon: const Text('✨', style: TextStyle(fontSize: 20)),
+                            tooltip: 'AI変換',
+                            onPressed: (hasText && !_isTransforming)
+                                ? _showTransformBottomSheet
+                                : null,
+                            style: IconButton.styleFrom(
+                              padding: const EdgeInsets.all(8),
+                              minimumSize: const Size(40, 40),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: TextField(
                           controller: _controller,

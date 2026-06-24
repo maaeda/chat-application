@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 
@@ -120,5 +121,64 @@ class AiBackendService {
       (m) => m.name == name,
       orElse: () => kLocalModels.first,
     );
+  }
+
+  /// ローカルLLMモデルが利用可能か確認し、必要に応じてロードする。
+  ///
+  /// アプリ再起動後、FlutterGemma.initialize() だけではモデルはメモリに
+  /// ロードされない（hasActiveModel() == false）。
+  /// installModel().fromNetwork().install() を再度呼ぶことで、
+  /// ディスク上のモデルファイルを再登録してアクティブにする。
+  /// ファイルが既に存在する場合、再ダウンロードは発生しない。
+  static Future<bool> ensureLocalModelReady() async {
+    // 既にアクティブならOK
+    if (FlutterGemma.hasActiveModel()) return true;
+
+    // 選択中のモデルを取得
+    final modelName = await getSelectedModelName();
+    final model = getModelByName(modelName);
+    final fileId = model.url.split('/').last;
+
+    // ディスク上にインストールされているかチェック
+    final isInstalled = await FlutterGemma.isModelInstalled(fileId);
+    debugPrint('LocalLLM check: model=$modelName, fileId=$fileId, '
+        'installed=$isInstalled, active=${FlutterGemma.hasActiveModel()}');
+
+    if (!isInstalled) return false;
+
+    // インストール済みだがアクティブでない → モデルを再登録してロードする
+    try {
+      debugPrint('LocalLLM: モデルを再登録・ロード中... (${model.displayName})');
+      await FlutterGemma.installModel(
+        modelType: model.modelType,
+      ).fromNetwork(model.url).install();
+      debugPrint('LocalLLM: モデルのロード完了 (${model.displayName})');
+      return true;
+    } catch (e) {
+      debugPrint('LocalLLM: モデルのロードに失敗: $e');
+      return false;
+    }
+  }
+
+  /// アプリ起動時にローカルLLMバックエンドが選択されていれば
+  /// モデルを自動ロードする。main() から呼び出す。
+  static Future<void> loadLocalModelOnStartup() async {
+    try {
+      final backend = await getBackend();
+      if (backend != AiBackend.localLlm) {
+        debugPrint('LocalLLM: バックエンドがローカルLLMではないためスキップ');
+        return;
+      }
+
+      final ready = await ensureLocalModelReady();
+      if (ready) {
+        debugPrint('LocalLLM: 起動時の自動ロード完了');
+      } else {
+        debugPrint('LocalLLM: モデルが未インストールのためスキップ');
+      }
+    } catch (e) {
+      // 起動をブロックしないよう、エラーは握りつぶす
+      debugPrint('LocalLLM: 起動時の自動ロードでエラー (非致命的): $e');
+    }
   }
 }
