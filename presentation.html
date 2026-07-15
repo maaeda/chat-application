@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firebaseチャットアプリ × オンデバイスAI 発表スライド</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-gradient: radial-gradient(circle at 50% 50%, #1e1b4b 0%, #030712 100%);
+      --text-main: #f3f4f6;
+      --text-sub: #9ca3af;
+      --primary: #3b82f6;
+      --primary-glow: rgba(59, 130, 246, 0.4);
+      --secondary: #a855f7;
+      --secondary-glow: rgba(168, 85, 247, 0.4);
+      --accent: #f59e0b;
+      --card-bg: rgba(17, 24, 39, 0.7);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --success: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', 'Noto Sans JP', sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* 背景の光の玉（装飾） */
+    .glow-sphere {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      transition: all 1s ease;
+    }
+
+    .glow-1 {
+      width: 400px;
+      height: 400px;
+      background: var(--primary);
+      top: 10%;
+      left: 10%;
+    }
+
+    .glow-2 {
+      width: 500px;
+      height: 500px;
+      background: var(--secondary);
+      bottom: 10%;
+      right: 10%;
+    }
+
+    /* スライドコンテナ */
+    .slider-viewport {
+      position: relative;
+      width: 90vw;
+      height: 80vh;
+      max-width: 1200px;
+      max-height: 800px;
+      z-index: 10;
+      perspective: 1500px;
+    }
+
+    /* 各スライド */
+    .slide {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 60px;
+      opacity: 0;
+      pointer-events: none;
+      transform: rotateY(15deg) translateZ(-100px) scale(0.95);
+      transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .slide.active {
+      opacity: 1;
+      pointer-events: auto;
+      transform: rotateY(0deg) translateZ(0) scale(1);
+    }
+
+    .slide.prev {
+      transform: rotateY(-15deg) translateZ(-100px) scale(0.95);
+    }
+
+    /* スライドコンテンツのタイポグラフィ */
+    h1 {
+      font-size: 3.5rem;
+      font-weight: 800;
+      line-height: 1.2;
+      background: linear-gradient(to right, #60a5fa, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #60a5fa;
+      margin-bottom: 30px;
+      position: relative;
+      display: inline-block;
+    }
+
+    h2::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: -8px;
+      width: 60px;
+      height: 4px;
+      background: linear-gradient(to right, var(--primary), var(--secondary));
+      border-radius: 2px;
+    }
+
+    h3 {
+      font-size: 1.8rem;
+      font-weight: 400;
+      color: var(--text-sub);
+      margin-bottom: 15px;
+    }
+
+    p {
+      font-size: 1.25rem;
+      line-height: 1.8;
+      color: var(--text-sub);
+      margin-bottom: 20px;
+    }
+
+    ul {
+      list-style-type: none;
+      margin-top: 15px;
+    }
+
+    li {
+      font-size: 1.35rem;
+      line-height: 1.8;
+      margin-bottom: 15px;
+      padding-left: 30px;
+      position: relative;
+      color: var(--text-main);
+    }
+
+    li::before {
+      content: "✦";
+      position: absolute;
+      left: 0;
+      color: var(--primary);
+      font-weight: bold;
+    }
+
+    .highlight {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .tech {
+      color: var(--success);
+      font-weight: 700;
+    }
+
+    /* タイトルスライド専用 */
+    .title-slide {
+      text-align: center;
+      align-items: center;
+    }
+
+    .title-slide h1 {
+      font-size: 4rem;
+      margin-bottom: 30px;
+      animation: pulse 4s infinite alternate;
+    }
+
+    .title-slide h3 {
+      font-size: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 15px 30px;
+      display: inline-block;
+      letter-spacing: 0.1em;
+      margin-bottom: 50px;
+    }
+
+    .author {
+      font-size: 1.1rem;
+      color: var(--text-sub);
+    }
+
+    /* グリッドレイアウト（2カラム用） */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 24px;
+      transition: all 0.3s ease;
+    }
+
+    .card:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(59, 130, 246, 0.3);
+      transform: translateY(-5px);
+    }
+
+    .card h4 {
+      font-size: 1.4rem;
+      color: #f3f4f6;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* テーブルスタイル */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      font-size: 1.1rem;
+    }
+
+    th, td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    th {
+      background: rgba(255, 255, 255, 0.05);
+      color: #60a5fa;
+      font-weight: 600;
+    }
+
+    tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* コントロール・ナビゲーション */
+    .controls {
+      position: absolute;
+      bottom: 40px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      z-index: 100;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+      padding: 12px 20px;
+      border-radius: 50px;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+      box-shadow: 0 0 15px var(--primary-glow);
+      transform: translateY(-2px);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .progress-container {
+      width: 300px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(to right, var(--primary), var(--secondary));
+      transition: width 0.3s ease;
+    }
+
+    .slide-number {
+      font-size: 0.9rem;
+      color: var(--text-sub);
+      min-width: 60px;
+      text-align: center;
+    }
+
+    /* ヘルプガイド */
+    .help-tooltip {
+      position: absolute;
+      bottom: 40px;
+      right: 40px;
+      font-size: 0.85rem;
+      color: var(--text-sub);
+      background: rgba(0, 0, 0, 0.4);
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    @keyframes pulse {
+      0% {
+        filter: drop-shadow(0 0 5px rgba(96, 165, 250, 0.2));
+      }
+      100% {
+        filter: drop-shadow(0 0 20px rgba(192, 132, 252, 0.6));
+      }
+    }
+
+    /* バッジ */
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+
+    .badge-auth {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .badge-free {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 装飾用の光の球 -->
+  <div class="glow-sphere glow-1" id="glow1"></div>
+  <div class="glow-sphere glow-2" id="glow2"></div>
+
+  <!-- スライド表示エリア -->
+  <div class="slider-viewport">
+
+    <!-- Slide 1: タイトル -->
+    <div class="slide title-slide active">
+      <h1>Firebaseチャットアプリ<br>× オンデバイスAI</h1>
+      <h3>〜 クラウドとローカルLLMを自在に行き来する、次世代Flutterチャット 〜</h3>
+      <div class="author">
+        <p>発表スライド</p>
+      </div>
+    </div>
+
+    <!-- Slide 2: アプリの概要 -->
+    <div class="slide">
+      <h2>📱 アプリの概要</h2>
+      <p>Firebaseの強力なバックエンド機能と、最先端のオンデバイスAIを融合させたFlutter製チャットアプリケーション。</p>
+      <div class="grid-2" style="margin-top: 30px;">
+        <div class="card">
+          <h4>💬 リアルタイムチャット</h4>
+          <p style="font-size: 1.1rem; margin-bottom: 0;">Google Auth、Firestore による低遅延リアルタイム対話。グループ作成やメンバー管理をシームレスに提供。</p>
+        </div>
+        <div class="card">
+          <h4>🤖 ハイブリッドAIエンジン</h4>
+          <p style="font-size: 1.1rem; margin-bottom: 0;">クラウドAI（Gemini API）とオンデバイスAI（ローカルLLM）を動的に切り替えるマルチバックエンド設計。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 3: クラウドAIの課題 -->
+    <div class="slide">
+      <h2>🚨 背景：クラウドAI（API）が抱える課題</h2>
+      <p>クラウドLLMへの全面依存には、いくつかの重大なトレードオフがあります。</p>
+      <ul>
+        <li><span class="highlight">コストの蓄積</span>：ユーザー数や利用量の増加に伴い、API利用料金が跳ね上がる。</li>
+        <li><span class="highlight">プライバシーの懸念</span>：すべてのやり取りや機密データが外部サーバーへ送信される。</li>
+        <li><span class="highlight">ネットワーク依存</span>：オフラインや地下、電波の不安定な環境ではAIアシストが完全に停止する。</li>
+      </ul>
+    </div>
+
+    <!-- Slide 4: ローカルLLMという解決策 -->
+    <div class="slide">
+      <h2>💡 解決策：オンデバイスLLMの統合</h2>
+      <p>「完全オフライン・ゼロコスト・100%プライベート」な第3の選択肢</p>
+      <div class="grid-2" style="margin-top: 30px;">
+        <div class="card">
+          <h4>🔒 強固なセキュリティ</h4>
+          <p style="font-size: 1.1rem; margin-bottom: 0;">会話データは一切端末外に送信されず、ローカルで完結。機密情報のやり取りも安心。</p>
+        </div>
+        <div class="card">
+          <h4>💸 恒久的な無料化</h4>
+          <p style="font-size: 1.1rem; margin-bottom: 0;">端末のCPU/GPUで推論を回すため、サーバー費用は不要。API制限を気にせず無制限に利用可能。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 5: 推し機能①：完全ローカルで動くLLM -->
+    <div class="slide">
+      <h2>🌟 推し機能①：完全ローカルで動くLLM</h2>
+      <p><span class="tech">flutter_gemma</span> パッケージをベースに、多彩な軽量オープンソースLLMのダウンロード・切り替えに対応。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>モデル名</th>
+            <th>サイズ</th>
+            <th>特徴</th>
+            <th>HF認証</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Gemma 3 270M</strong></td>
+            <td>270M</td>
+            <td>Googleの最軽量モデル。驚くほど高速に動作。</td>
+            <td><span class="badge badge-auth">要</span></td>
+          </tr>
+          <tr>
+            <td><strong>SmolLM2 135M</strong></td>
+            <td>135M</td>
+            <td>超軽量・超高速。動作確認や旧型端末に最適。</td>
+            <td><span class="badge badge-free">不要</span></td>
+          </tr>
+          <tr>
+            <td><strong>Qwen2.5 0.5B</strong></td>
+            <td>0.5B</td>
+            <td>軽量ながら対話能力のバランスが良い高性能モデル。</td>
+            <td><span class="badge badge-free">不要</span></td>
+          </tr>
+          <tr>
+            <td><strong>Gemma 3 1B</strong></td>
+            <td>1.0B</td>
+            <td>Google最新軽量モデル。高精度な日本語対応。</td>
+            <td><span class="badge badge-auth">要</span></td>
+          </tr>
+          <tr>
+            <td><strong>Phi-4 mini</strong></td>
+            <td>3.8B</td>
+            <td>Microsoft製。小型でありながら最高クラスの知能。</td>
+            <td><span class="badge badge-free">不要</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Slide 6: 推し機能②：シームレスなモデル管理とUX -->
+    <div class="slide">
+      <h2>🌟 推し機能②：シームレスなモデル管理とUX</h2>
+      <p>モバイル端末ならではの不確実性を排除する、高度なバックエンド管理設計。</p>
+      <ul>
+        <li><strong>ダウンロード進行表示</strong>：Hugging Faceからのダウンロード進行状況をプログレスバーでリアルタイム可視化。</li>
+        <li><span class="highlight">自己修復機能（Self-Healing）</span>：ディスク上の物理ファイルとデータベース（SharedPreferences）のメタデータのズレを検知し、未登録ファイルは自動登録、欠損ファイルはクリーンアップする仕組み。</li>
+        <li><strong>起動時自動ロード</strong>：アプリ起動時にローカルLLMが選ばれていれば自動でメモリに展開。最初の会話開始までのラグをゼロに。</li>
+      </ul>
+    </div>
+
+    <!-- Slide 7: 高度なAIアシスト機能 -->
+    <div class="slide">
+      <h2>⚡ 実用的なAIアシスト機能</h2>
+      <p>チャット画面に溶け込む、3つのスマートAI体験。</p>
+      <div class="grid-2">
+        <div class="card">
+          <h4>💡 スマートリプライ</h4>
+          <p style="font-size: 1.05rem; margin-bottom: 0;">直近10件の履歴から、文脈を捉えた日本語の返信候補を3つ生成。ワンタップでクイック送信。</p>
+        </div>
+        <div class="card">
+          <h4>🎨 AIテキスト変換</h4>
+          <p style="font-size: 1.05rem; margin-bottom: 0;">丁寧、ビジネス、カジュアルから、「執事風」「先生風」まで対応。変更点の差分プレビューを見てから適用可能。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 8: アーキテクチャと技術スタック -->
+    <div class="slide">
+      <h2>🛠️ アーキテクチャ & 技術スタック</h2>
+      <div class="grid-2" style="margin-top: 20px;">
+        <div>
+          <p><strong>クライアントサイド</strong></p>
+          <ul>
+            <li><span class="tech">Flutter 3.9.2</span> + <span class="tech">Dart 3.5.0</span></li>
+            <li><span class="tech">flutter_gemma</span> (オンデバイス推論エンジン)</li>
+            <li><span class="tech">shared_preferences</span> (設定、トークン永続化)</li>
+          </ul>
+        </div>
+        <div>
+          <p><strong>バックエンド / インフラ</strong></p>
+          <ul>
+            <li><span class="tech">Firebase Auth</span> (Googleサインイン)</li>
+            <li><span class="tech">Cloud Firestore</span> (リアルタイムメッセージ同期)</li>
+            <li><span class="tech">Firebase App Check</span> (不正アクセス防止)</li>
+            <li><span class="tech">Hugging Face</span> (モデルデータホスティング)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 9: まとめと展望 -->
+    <div class="slide">
+      <h2>🏁 まとめと今後の展望</h2>
+      <p>「AIはクラウドから、あなたのポケットの中へ」</p>
+      <ul>
+        <li><strong>ハイブリッドAIの確立</strong>：用途やプライバシー重要度に応じて、クラウドとローカルを柔軟に使い分ける実装モデル。</li>
+        <li><strong>さらなる進化</strong>：
+          <ul>
+            <li>ユーザー固有の会話傾向を学習する「オンデバイスLoRAチューニング」</li>
+            <li>カメラ画像や音声をその場で処理する「オンデバイス・マルチモーダルAI」</li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- ナビゲーションコントロール -->
+  <div class="controls">
+    <button class="btn" id="prevBtn">← 前へ</button>
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <span class="slide-number" id="slideNum">1 / 9</span>
+    <button class="btn" id="nextBtn">次へ →</button>
+  </div>
+
+  <div class="help-tooltip">
+    ← / → キー または Space / Backspace で移動できます
+  </div>
+
+  <script>
+    const slides = document.querySelectorAll('.slide');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const progressBar = document.getElementById('progressBar');
+    const slideNum = document.getElementById('slideNum');
+    const glow1 = document.getElementById('glow1');
+    const glow2 = document.getElementById('glow2');
+
+    let currentSlide = 0;
+    const totalSlides = slides.length;
+
+    // スライドの更新
+    function updateSlides() {
+      slides.forEach((slide, index) => {
+        slide.classList.remove('active', 'prev');
+        if (index === currentSlide) {
+          slide.classList.add('active');
+        } else if (index < currentSlide) {
+          slide.classList.add('prev');
+        }
+      });
+
+      // 進捗バーとページ番号の更新
+      const percent = (currentSlide / (totalSlides - 1)) * 100;
+      progressBar.style.width = `${percent}%`;
+      slideNum.textContent = `${currentSlide + 1} / ${totalSlides}`;
+
+      // 背景の光球を動的に動かす（スライドごとに位置や大きさを変えて躍動感を出す）
+      const h1 = 10 + (currentSlide * 8) % 60;
+      const w1 = 15 + (currentSlide * 12) % 50;
+      const h2 = 80 - (currentSlide * 8) % 60;
+      const w2 = 85 - (currentSlide * 12) % 50;
+      glow1.style.top = `${h1}%`;
+      glow1.style.left = `${w1}%`;
+      glow2.style.bottom = `${100 - h2}%`;
+      glow2.style.right = `${100 - w2}%`;
+    }
+
+    // 次のスライドへ
+    function nextSlide() {
+      if (currentSlide < totalSlides - 1) {
+        currentSlide++;
+        updateSlides();
+      }
+    }
+
+    // 前のスライドへ
+    function prevSlide() {
+      if (currentSlide > 0) {
+        currentSlide--;
+        updateSlides();
+      }
+    }
+
+    // イベントリスナー
+    nextBtn.addEventListener('click', nextSlide);
+    prevBtn.addEventListener('click', prevSlide);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
+        e.preventDefault();
+        prevSlide();
+      }
+    });
+
+    // 初期化
+    updateSlides();
+  </script>
+</body>
+</html>
